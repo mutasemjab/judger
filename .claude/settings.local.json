@@ -1,0 +1,40 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(php --version)",
+      "Bash(composer --version)",
+      "Bash(composer create-project *)",
+      "PowerShell(Get-ChildItem C:\\\\xampp\\\\htdocs\\\\amir\\\\app -Recurse | Select-Object FullName | ForEach-Object { $_.FullName.Replace\\(\"C:\\\\xampp\\\\htdocs\\\\amir\\\\\", \"\"\\) })",
+      "PowerShell(New-Item -ItemType Directory -Force -Path \"C:\\\\xampp\\\\htdocs\\\\amir\\\\app\\\\Enums\")",
+      "PowerShell(New-Item -ItemType Directory -Force -Path \"C:\\\\xampp\\\\htdocs\\\\amir\\\\app\\\\Services\\\\AI\\\\Contracts\")",
+      "PowerShell(New-Item -ItemType Directory -Force -Path \"C:\\\\xampp\\\\htdocs\\\\amir\\\\app\\\\Services\\\\AI\\\\Providers\")",
+      "PowerShell(New-Item -ItemType Directory -Force -Path \"C:\\\\xampp\\\\htdocs\\\\amir\\\\app\\\\Services\\\\Vector\\\\Contracts\")",
+      "PowerShell(New-Item -ItemType Directory -Force -Path \"C:\\\\xampp\\\\htdocs\\\\amir\\\\app\\\\Services\\\\Documents\")",
+      "PowerShell(New-Item -ItemType Directory -Force -Path \"C:\\\\xampp\\\\htdocs\\\\amir\\\\app\\\\Services\\\\Search\")",
+      "PowerShell(New-Item -ItemType Directory -Force -Path \"C:\\\\xampp\\\\htdocs\\\\amir\\\\app\\\\Services\\\\Chat\")",
+      "PowerShell(New-Item -ItemType Directory -Force -Path \"C:\\\\xampp\\\\htdocs\\\\amir\\\\app\\\\Services\\\\Tools\")",
+      "PowerShell(New-Item -ItemType Directory -Force -Path \"C:\\\\xampp\\\\htdocs\\\\amir\\\\app\\\\Services\\\\Auth\")",
+      "PowerShell(New-Item -ItemType Directory -Force -Path \"C:\\\\xampp\\\\htdocs\\\\amir\\\\app\\\\Services\\\\Cases\")",
+      "PowerShell(New-Item -ItemType Directory -Force -Path \"C:\\\\xampp\\\\htdocs\\\\amir\\\\app\\\\Services\\\\Subscriptions\")",
+      "PowerShell(New-Item -ItemType Directory -Force -Path \"C:\\\\xampp\\\\htdocs\\\\amir\\\\app\\\\Services\\\\Settings\")",
+      "PowerShell(New-Item -ItemType Directory -Force -Path \"C:\\\\xampp\\\\htdocs\\\\amir\\\\app\\\\Services\\\\Dashboard\")",
+      "PowerShell(New-Item -ItemType Directory -Force -Path \"C:\\\\xampp\\\\htdocs\\\\amir\\\\app\\\\Jobs\")",
+      "PowerShell(New-Item -ItemType Directory -Force -Path \"C:\\\\xampp\\\\htdocs\\\\amir\\\\app\\\\Policies\")",
+      "PowerShell(New-Item -ItemType Directory -Force -Path \"C:\\\\xampp\\\\htdocs\\\\amir\\\\app\\\\Repositories\")",
+      "PowerShell(New-Item -ItemType Directory -Force -Path \"C:\\\\xampp\\\\htdocs\\\\amir\\\\app\\\\Http\\\\Requests\\\\Api\\\\V1\")",
+      "PowerShell(New-Item -ItemType Directory -Force -Path \"C:\\\\xampp\\\\htdocs\\\\amir\\\\app\\\\Http\\\\Resources\\\\Api\\\\V1\")",
+      "PowerShell(New-Item -ItemType Directory -Force -Path \"C:\\\\xampp\\\\htdocs\\\\amir\\\\app\\\\Http\\\\Controllers\\\\Api\\\\V1\\\\Admin\")",
+      "PowerShell(New-Item -ItemType Directory -Force -Path \"C:\\\\xampp\\\\htdocs\\\\amir\\\\app\\\\Events\")",
+      "PowerShell(New-Item -ItemType Directory -Force -Path \"C:\\\\xampp\\\\htdocs\\\\amir\\\\app\\\\Listeners\")",
+      "PowerShell(New-Item -ItemType Directory -Force -Path \"C:\\\\xampp\\\\htdocs\\\\amir\\\\tests\\\\Feature\\\\Api\")",
+      "PowerShell(New-Item -ItemType Directory -Force -Path \"C:\\\\xampp\\\\htdocs\\\\amir\\\\tests\\\\Unit\")",
+      "PowerShell(New-Item -ItemType Directory -Force -Path \"C:\\\\xampp\\\\htdocs\\\\amir\\\\docs\")",
+      "PowerShell($content = Get-Content \"C:\\\\xampp\\\\htdocs\\\\amir\\\\docs\\\\postman_collection.json\" -Raw; try { $null = $content | ConvertFrom-Json; Write-Output \"✅ Valid JSON\" } catch { Write-Output \"❌ Invalid JSON: $_\" })",
+      "PowerShell($content = Get-Content \"C:\\\\xampp\\\\htdocs\\\\amir\\\\docs\\\\postman_collection.json\" -Raw; $json = $content | ConvertFrom-Json; $count = \\($json.item | ForEach-Object { $_.item.Count } | Measure-Object -Sum\\).Sum; Write-Output \"Folders: $\\($json.item.Count\\)\"; Write-Output \"Total requests: $count\")",
+      "PowerShell(Get-ChildItem C:\\\\xampp\\\\htdocs\\\\amir\\\\resources -Recurse | Select-Object FullName | ForEach-Object { $_.FullName.Replace\\(\"C:\\\\xampp\\\\htdocs\\\\amir\\\\resources\\\\\", \"\"\\) } | Select-Object -First 60)",
+      "PowerShell(New-Item -ItemType Directory -Force -Path \"C:\\\\xampp\\\\htdocs\\\\amir\\\\public\\\\assets\\\\admin\\\\css\")",
+      "PowerShell(New-Item -ItemType Directory -Force -Path \"C:\\\\xampp\\\\htdocs\\\\amir\\\\public\\\\assets\\\\admin\\\\js\")",
+      "PowerShell(New-Item -ItemType Directory -Force -Path \"C:\\\\xampp\\\\htdocs\\\\amir\\\\app\\\\Http\\\\Controllers\\\\Admin\\\\Web\")"
+    ]
+  }
+}
