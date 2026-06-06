@@ -5,20 +5,28 @@ use App\Http\Controllers\Admin\Web\AdminActivityLogWebController;
 use App\Http\Controllers\Admin\Web\AdminAiToolsWebController;
 use App\Http\Controllers\Admin\Web\AdminAuthController;
 use App\Http\Controllers\Admin\Web\AdminCasesWebController;
+use App\Http\Controllers\Admin\Web\AdminConversationWebController;
 use App\Http\Controllers\Admin\Web\AdminDashboardWebController;
 use App\Http\Controllers\Admin\Web\AdminDocumentsWebController;
 use App\Http\Controllers\Admin\Web\AdminKnowledgeWebController;
+use App\Http\Controllers\Admin\Web\AdminNotificationsWebController;
+use App\Http\Controllers\Admin\Web\AdminPlansWebController;
+use App\Http\Controllers\Admin\Web\AdminSubscriptionsWebController;
+use App\Http\Controllers\Admin\Web\AdminTemplateCategoryWebController;
 use App\Http\Controllers\Admin\Web\AdminTemplateWebController;
 use App\Http\Controllers\Admin\Web\AdminUsersWebController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('admin')->name('admin.')->group(function () {
 
-    // ── Guest (unauthenticated) ───────────────────────────────────────────
+    // Redirect /admin → /admin/login
+    Route::get('/', fn () => redirect()->route('admin.showlogin'));
+
+    // ── Guest ────────────────────────────────────────────────────────────
     Route::get('/login', [AdminAuthController::class, 'showLogin'])->name('showlogin');
     Route::post('/login', [AdminAuthController::class, 'login'])->name('login');
 
-    // ── Authenticated admin routes ────────────────────────────────────────
+    // ── Authenticated ─────────────────────────────────────────────────────
     Route::middleware('admin_web')->group(function () {
 
         Route::post('/logout', [AdminAuthController::class, 'logout'])->name('logout');
@@ -37,11 +45,30 @@ Route::prefix('admin')->name('admin.')->group(function () {
         Route::post('/users/{user}/suspend', [AdminUsersWebController::class, 'suspend'])->name('users.suspend');
         Route::post('/users/{user}/activate', [AdminUsersWebController::class, 'activate'])->name('users.activate');
 
+        // Cases
+        Route::get('/cases', [AdminCasesWebController::class, 'index'])->name('cases.index');
+
+        // Case Documents
+        Route::get('/documents', [AdminDocumentsWebController::class, 'index'])->name('documents.index');
+        Route::post('/documents/{document}/reprocess', [AdminDocumentsWebController::class, 'reprocess'])->name('documents.reprocess');
+        Route::delete('/documents/{document}', [AdminDocumentsWebController::class, 'destroy'])->name('documents.destroy');
+
+        // Conversations
+        Route::get('/conversations', [AdminConversationWebController::class, 'index'])->name('conversations.index');
+
         // Knowledge Documents
         Route::get('/knowledge', [AdminKnowledgeWebController::class, 'index'])->name('knowledge.index');
         Route::post('/knowledge', [AdminKnowledgeWebController::class, 'store'])->name('knowledge.store');
         Route::post('/knowledge/{knowledgeDocument}/reprocess', [AdminKnowledgeWebController::class, 'reprocess'])->name('knowledge.reprocess');
         Route::delete('/knowledge/{knowledgeDocument}', [AdminKnowledgeWebController::class, 'destroy'])->name('knowledge.destroy');
+
+        // AI Tools
+        Route::get('/ai-tools', [AdminAiToolsWebController::class, 'index'])->name('ai-tools.index');
+
+        // Template Categories
+        Route::get('/template-categories', [AdminTemplateCategoryWebController::class, 'index'])->name('template-categories.index');
+        Route::post('/template-categories', [AdminTemplateCategoryWebController::class, 'store'])->name('template-categories.store');
+        Route::put('/template-categories/{templateCategory}', [AdminTemplateCategoryWebController::class, 'update'])->name('template-categories.update');
 
         // Templates
         Route::get('/templates', [AdminTemplateWebController::class, 'index'])->name('templates.index');
@@ -51,19 +78,18 @@ Route::prefix('admin')->name('admin.')->group(function () {
         Route::put('/templates/{template}', [AdminTemplateWebController::class, 'update'])->name('templates.update');
         Route::delete('/templates/{template}', [AdminTemplateWebController::class, 'destroy'])->name('templates.destroy');
 
-        // Cases
-        Route::get('/cases', [AdminCasesWebController::class, 'index'])->name('cases.index');
+        // Subscription Plans
+        Route::get('/plans', [AdminPlansWebController::class, 'index'])->name('plans.index');
+        Route::put('/plans/{plan}', [AdminPlansWebController::class, 'update'])->name('plans.update');
 
-        // Case Documents
-        Route::get('/documents', [AdminDocumentsWebController::class, 'index'])->name('documents.index');
-        Route::post('/documents/{document}/reprocess', [AdminDocumentsWebController::class, 'reprocess'])->name('documents.reprocess');
-        Route::delete('/documents/{document}', [AdminDocumentsWebController::class, 'destroy'])->name('documents.destroy');
+        // Subscriptions
+        Route::get('/subscriptions', [AdminSubscriptionsWebController::class, 'index'])->name('subscriptions.index');
 
-        // AI Tools
-        Route::get('/ai-tools', [AdminAiToolsWebController::class, 'index'])->name('ai-tools.index');
+        // Notifications
+        Route::get('/notifications', [AdminNotificationsWebController::class, 'index'])->name('notifications.index');
 
         // Activity Logs
-        Route::get('/activity-logs', [AdminActivityLogWebController::class, 'index'])->name('activity-logs.index');
+        Route::get('/activity-logs', [AdminActivityLogWebController::class, 'index'])->name('activity.index');
 
         // Roles
         Route::get('/roles', [RoleController::class, 'index'])->name('role.index');
