@@ -74,6 +74,7 @@ class Kernel extends HttpKernel
         'permission' => \App\Http\Middleware\CheckPermission::class,
         'feature' => \App\Http\Middleware\CheckFeatureAccess::class,
         'admin' => \App\Http\Middleware\AdminMiddleware::class,
+        'admin_web' => \App\Http\Middleware\AdminWebMiddleware::class,
         'localize'                => \Mcamara\LaravelLocalization\Middleware\LaravelLocalizationRoutes::class,
         'localizationRedirect'    => \Mcamara\LaravelLocalization\Middleware\LaravelLocalizationRedirectFilter::class,
         'localeSessionRedirect'   => \Mcamara\LaravelLocalization\Middleware\LocaleSessionRedirect::class,

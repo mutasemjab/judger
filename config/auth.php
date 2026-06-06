@@ -48,6 +48,10 @@ return [
             'driver' => 'session',
             'provider' => 'admins',
         ],
+        'admin_web' => [
+            'driver' => 'session',
+            'provider' => 'users',
+        ],
         'user' => [
             'driver' => 'session',
             'provider' => 'users',

@@ -14,11 +14,6 @@ use App\Http\Controllers\Api\V1\SettingController;
 use App\Http\Controllers\Api\V1\SubscriptionController;
 use App\Http\Controllers\Api\V1\TaskController;
 use App\Http\Controllers\Api\V1\TemplateController;
-use App\Http\Controllers\Api\V1\Admin\AdminDashboardController;
-use App\Http\Controllers\Api\V1\Admin\AdminUserController;
-use App\Http\Controllers\Api\V1\Admin\AdminKnowledgeDocumentController;
-use App\Http\Controllers\Api\V1\Admin\AdminTemplateController;
-use App\Http\Controllers\Api\V1\Admin\AdminActivityLogController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function () {
@@ -127,31 +122,6 @@ Route::prefix('v1')->group(function () {
         Route::post('/data-export', [SettingController::class, 'requestDataExport']);
         Route::get('/legal-disclaimer', [SettingController::class, 'legalDisclaimer']);
 
-        // ── Admin Routes ──────────────────────────────────────────────────
-        Route::prefix('admin')->middleware('admin')->group(function () {
-            Route::get('/dashboard', [AdminDashboardController::class, 'index']);
 
-            // Users
-            Route::get('/users', [AdminUserController::class, 'index']);
-            Route::get('/users/{user}', [AdminUserController::class, 'show']);
-            Route::post('/users/{user}/suspend', [AdminUserController::class, 'suspend']);
-            Route::post('/users/{user}/activate', [AdminUserController::class, 'activate']);
-
-            // Knowledge Documents
-            Route::get('/knowledge-documents', [AdminKnowledgeDocumentController::class, 'index']);
-            Route::post('/knowledge-documents', [AdminKnowledgeDocumentController::class, 'store'])->middleware('throttle:10,1');
-            Route::get('/knowledge-documents/{knowledgeDocument}', [AdminKnowledgeDocumentController::class, 'show']);
-            Route::delete('/knowledge-documents/{knowledgeDocument}', [AdminKnowledgeDocumentController::class, 'destroy']);
-            Route::post('/knowledge-documents/{knowledgeDocument}/reprocess', [AdminKnowledgeDocumentController::class, 'reprocess']);
-
-            // Templates
-            Route::get('/templates', [AdminTemplateController::class, 'index']);
-            Route::post('/templates', [AdminTemplateController::class, 'store']);
-            Route::put('/templates/{template}', [AdminTemplateController::class, 'update']);
-            Route::delete('/templates/{template}', [AdminTemplateController::class, 'destroy']);
-
-            // Activity Logs
-            Route::get('/activity-logs', [AdminActivityLogController::class, 'index']);
-        });
     });
 });
