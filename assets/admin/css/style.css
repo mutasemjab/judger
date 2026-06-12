@@ -780,6 +780,279 @@ body.rtl {
 /* ── Table Responsive ─────────────────────────────────────── */
 .table-responsive { border-radius: 0 0 var(--card-radius) var(--card-radius); }
 
+/* ── Knowledge batch uploader ────────────────────────────── */
+.knowledge-batch-card {
+    background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
+}
+
+.knowledge-batch-subtitle {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    margin-top: 6px;
+}
+
+.knowledge-batch-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.95fr);
+    gap: 20px;
+    align-items: start;
+}
+
+.knowledge-batch-panel {
+    background: #f8fafc;
+    border: 1px solid var(--card-border);
+    border-radius: 18px;
+    padding: 20px;
+}
+
+.knowledge-dropzone {
+    border: 1.5px dashed #cbd5e1;
+    border-radius: 20px;
+    padding: 28px;
+    text-align: center;
+    cursor: pointer;
+    background:
+        radial-gradient(circle at top, rgba(99,102,241,0.10), transparent 45%),
+        #ffffff;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    transition: border-color var(--transition), box-shadow var(--transition), transform var(--transition);
+}
+
+.knowledge-dropzone:hover,
+.knowledge-dropzone.is-dragging {
+    border-color: var(--primary);
+    box-shadow: 0 12px 32px rgba(15,23,42,0.08);
+    transform: translateY(-1px);
+}
+
+.knowledge-dropzone-icon {
+    width: 64px;
+    height: 64px;
+    border-radius: 18px;
+    background: var(--primary-soft);
+    color: var(--primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.45rem;
+}
+
+.knowledge-dropzone h4 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.knowledge-dropzone p {
+    margin: 0;
+    max-width: 560px;
+    color: var(--text-secondary);
+    font-size: 0.84rem;
+}
+
+.knowledge-dropzone-note {
+    font-size: 0.76rem;
+    color: var(--text-muted);
+}
+
+.knowledge-batch-fields {
+    display: grid;
+    gap: 14px;
+    margin-top: 18px;
+}
+
+.knowledge-field-help {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin-top: 6px;
+}
+
+.knowledge-field-help-inline {
+    margin-top: 0;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    background: #ffffff;
+    border: 1px solid var(--card-border);
+    border-radius: 14px;
+    padding: 12px 14px;
+}
+
+.knowledge-field-help-inline i {
+    color: var(--warning);
+    margin-top: 2px;
+}
+
+.knowledge-batch-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 18px;
+}
+
+.knowledge-progress-card {
+    background: #ffffff;
+    border: 1px solid var(--card-border);
+    border-radius: 16px;
+    padding: 18px;
+}
+
+.knowledge-progress-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.knowledge-progress-bar {
+    height: 10px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: #e2e8f0;
+}
+
+.knowledge-progress-bar span {
+    display: block;
+    width: 0;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #6366f1, #3b82f6, #10b981);
+    transition: width 0.3s ease;
+}
+
+.knowledge-progress-note {
+    margin-top: 10px;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+}
+
+.knowledge-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    margin-top: 16px;
+}
+
+.knowledge-summary-tile {
+    background: #ffffff;
+    border: 1px solid var(--card-border);
+    border-radius: 14px;
+    padding: 14px 16px;
+}
+
+.knowledge-summary-label {
+    display: block;
+    font-size: 0.74rem;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+}
+
+.knowledge-summary-tile strong {
+    display: block;
+    font-size: 1.2rem;
+    color: var(--text-primary);
+}
+
+.knowledge-queue-wrap {
+    margin-top: 22px;
+}
+
+.knowledge-queue-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.knowledge-queue-header h4 {
+    margin: 0;
+    font-size: 0.9rem;
+    font-weight: 700;
+}
+
+.knowledge-queue-list {
+    background: #ffffff;
+    border: 1px solid var(--card-border);
+    border-radius: 16px;
+    max-height: 420px;
+    overflow-y: auto;
+}
+
+.knowledge-batch-item {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 16px 18px;
+    border-bottom: 1px solid #eef2f7;
+}
+
+.knowledge-batch-item:last-child {
+    border-bottom: none;
+}
+
+.knowledge-batch-item-name {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.knowledge-batch-item-meta {
+    margin-top: 5px;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+}
+
+.knowledge-batch-item-message {
+    margin-top: 8px;
+    font-size: 0.78rem;
+    color: var(--danger);
+    line-height: 1.5;
+}
+
+.knowledge-batch-item-side {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.knowledge-batch-item-time {
+    font-size: 0.74rem;
+    color: var(--text-muted);
+}
+
+.knowledge-queue-empty {
+    text-align: center;
+    padding: 42px 20px;
+    color: var(--text-muted);
+}
+
+.knowledge-queue-empty i {
+    font-size: 2rem;
+    opacity: 0.35;
+    margin-bottom: 10px;
+}
+
+.knowledge-queue-empty p {
+    margin: 0;
+}
+
+.table-status-note {
+    margin-top: 6px;
+    font-size: 0.75rem;
+    line-height: 1.45;
+    max-width: 280px;
+}
+
 /* ── Sidebar Overlay (mobile) ─────────────────────────────── */
 .sidebar-overlay {
     display: none;
@@ -815,6 +1088,7 @@ body.rtl {
     }
 
     .page-content { padding: 16px; }
+    .knowledge-batch-layout { grid-template-columns: 1fr; }
 
     .brand-name { opacity: 1 !important; width: auto !important; }
 }
@@ -822,6 +1096,11 @@ body.rtl {
 @media (max-width: 575.98px) {
     .user-name, .user-role { display: none; }
     .page-header { flex-direction: column; align-items: flex-start; }
+    .knowledge-dropzone { padding: 22px 16px; }
+    .knowledge-summary-grid { grid-template-columns: 1fr 1fr; }
+    .knowledge-queue-header,
+    .knowledge-batch-item,
+    .knowledge-batch-item-side { flex-direction: column; align-items: flex-start; }
 }
 
 /* ── Utilities ────────────────────────────────────────────── */

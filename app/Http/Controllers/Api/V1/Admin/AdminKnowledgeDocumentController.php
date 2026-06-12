@@ -33,7 +33,7 @@ class AdminKnowledgeDocumentController extends BaseApiController
         $path = $file->storeAs('knowledge_documents', $fileName);
 
         $document = KnowledgeDocument::create([
-            'title' => $request->title,
+            'title' => KnowledgeDocument::normalizeTitle($request->title, $file->getClientOriginalName()),
             'original_name' => $file->getClientOriginalName(),
             'file_name' => $fileName,
             'file_path' => $path,
@@ -62,7 +62,15 @@ class AdminKnowledgeDocumentController extends BaseApiController
 
     public function reprocess(KnowledgeDocument $knowledgeDocument): JsonResponse
     {
+        $knowledgeDocument->update([
+            'status' => 'uploaded',
+            'processing_error' => null,
+            'processed_at' => null,
+            'qdrant_points_count' => 0,
+        ]);
+
         ProcessKnowledgeDocumentJob::dispatch($knowledgeDocument->id);
+
         return $this->success(null, 'Reprocessing queued.');
     }
 }

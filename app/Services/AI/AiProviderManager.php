@@ -11,6 +11,10 @@ class AiProviderManager
 {
     public static function resolve(): LlmProviderInterface
     {
+        if (app()->bound(LlmProviderInterface::class)) {
+            return app(LlmProviderInterface::class);
+        }
+
         $provider = config('ai.provider', 'mock');
 
         return match ($provider) {
