@@ -132,30 +132,51 @@ class ProcessKnowledgeDocumentJob implements ShouldQueue
 
         $provider = AiProviderManager::resolve();
         $pointsCount = 0;
+        $batchSize = max(1, (int) config('ai.embedding_batch_size', 12));
+        $chunkBatches = array_chunk($chunks, $batchSize);
 
         try {
-            foreach ($chunks as $chunk) {
+            foreach ($chunkBatches as $batchIndex => $chunkBatch) {
                 $this->abortIfStopRequested($collectionName);
-
-                $embedding = $provider->embedding($chunk['content']);
-                $pointId = "kb_{$document->id}_{$chunk['chunk_index']}";
-
-                $vectorStore->upsertPoint($collectionName, $pointId, $embedding, [
-                    'source_type' => 'knowledge_base',
-                    'knowledge_document_id' => $document->id,
-                    'document_name' => $document->original_name,
-                    'title' => $document->title,
-                    'category' => $document->category ?? 'general',
-                    'page_number' => $chunk['page_number'],
-                    'end_page_number' => $chunk['end_page_number'] ?? $chunk['page_number'],
-                    'chunk_index' => $chunk['chunk_index'],
-                    'content' => $chunk['content'],
-                    'snippet' => $chunk['snippet'],
-                    'word_count' => $chunk['word_count'] ?? null,
-                    'status' => 'processed',
+                Log::info('knowledge.processing.embedding_batch_started', [
+                    'document_id' => $document->id,
+                    'batch' => $batchIndex + 1,
+                    'total_batches' => count($chunkBatches),
+                    'batch_size' => count($chunkBatch),
                 ]);
 
-                $pointsCount++;
+                $embeddings = $provider->embeddingMany(array_column($chunkBatch, 'content'));
+
+                if (count($embeddings) !== count($chunkBatch)) {
+                    throw new RuntimeException('OpenAI returned an unexpected number of embeddings for this batch.');
+                }
+
+                foreach ($chunkBatch as $offset => $chunk) {
+                    $embedding = $embeddings[$offset] ?? [];
+
+                    if ($embedding === []) {
+                        throw new RuntimeException('An embedding batch item was empty.');
+                    }
+
+                    $pointId = "kb_{$document->id}_{$chunk['chunk_index']}";
+
+                    $vectorStore->upsertPoint($collectionName, $pointId, $embedding, [
+                        'source_type' => 'knowledge_base',
+                        'knowledge_document_id' => $document->id,
+                        'document_name' => $document->original_name,
+                        'title' => $document->title,
+                        'category' => $document->category ?? 'general',
+                        'page_number' => $chunk['page_number'],
+                        'end_page_number' => $chunk['end_page_number'] ?? $chunk['page_number'],
+                        'chunk_index' => $chunk['chunk_index'],
+                        'content' => $chunk['content'],
+                        'snippet' => $chunk['snippet'],
+                        'word_count' => $chunk['word_count'] ?? null,
+                        'status' => 'processed',
+                    ]);
+
+                    $pointsCount++;
+                }
 
                 KnowledgeDocument::query()
                     ->whereKey($document->id)
@@ -163,6 +184,14 @@ class ProcessKnowledgeDocumentJob implements ShouldQueue
                         'qdrant_points_count' => $pointsCount,
                         'processed_chunks_count' => $pointsCount,
                     ]);
+
+                Log::info('knowledge.processing.embedding_batch_completed', [
+                    'document_id' => $document->id,
+                    'batch' => $batchIndex + 1,
+                    'total_batches' => count($chunkBatches),
+                    'processed_chunks' => $pointsCount,
+                    'total_chunks' => count($chunks),
+                ]);
             }
         } catch (KnowledgeProcessingStoppedException) {
             $this->markAsCancelled($collectionName);

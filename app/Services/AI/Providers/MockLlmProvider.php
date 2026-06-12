@@ -37,4 +37,9 @@ class MockLlmProvider implements LlmProviderInterface
         }
         return $vector;
     }
+
+    public function embeddingMany(array $texts): array
+    {
+        return array_map(fn ($text): array => $this->embedding((string) $text), $texts);
+    }
 }

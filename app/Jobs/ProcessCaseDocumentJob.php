@@ -52,30 +52,37 @@ class ProcessCaseDocumentJob implements ShouldQueue
 
         $provider = AiProviderManager::resolve();
         $pointsCount = 0;
+        $filteredChunks = array_values(array_filter($chunks, function (array $chunk): bool {
+            return ! empty(trim((string) ($chunk['content'] ?? '')));
+        }));
+        $batchSize = max(1, (int) config('ai.embedding_batch_size', 12));
 
-        foreach ($chunks as $chunk) {
-            if (empty(trim($chunk['content']))) {
-                continue;
+        foreach (array_chunk($filteredChunks, $batchSize) as $chunkBatch) {
+            $embeddings = $provider->embeddingMany(array_column($chunkBatch, 'content'));
+
+            if (count($embeddings) !== count($chunkBatch)) {
+                throw new \RuntimeException('OpenAI returned an unexpected number of case-document embeddings.');
             }
 
-            $embedding = $provider->embedding($chunk['content']);
-            $pointId = "case_{$document->id}_{$chunk['chunk_index']}";
+            foreach ($chunkBatch as $offset => $chunk) {
+                $pointId = "case_{$document->id}_{$chunk['chunk_index']}";
 
-            $vectorStore->upsertPoint($collectionName, $pointId, $embedding, [
-                'source_type' => 'case_document',
-                'case_document_id' => $document->id,
-                'legal_case_id' => $document->legal_case_id,
-                'user_id' => $document->user_id,
-                'document_name' => $document->original_name,
-                'document_type' => $document->document_type ?? 'document',
-                'page_number' => $chunk['page_number'],
-                'chunk_index' => $chunk['chunk_index'],
-                'content' => $chunk['content'],
-                'snippet' => $chunk['snippet'],
-                'status' => 'processed',
-            ]);
+                $vectorStore->upsertPoint($collectionName, $pointId, $embeddings[$offset], [
+                    'source_type' => 'case_document',
+                    'case_document_id' => $document->id,
+                    'legal_case_id' => $document->legal_case_id,
+                    'user_id' => $document->user_id,
+                    'document_name' => $document->original_name,
+                    'document_type' => $document->document_type ?? 'document',
+                    'page_number' => $chunk['page_number'],
+                    'chunk_index' => $chunk['chunk_index'],
+                    'content' => $chunk['content'],
+                    'snippet' => $chunk['snippet'],
+                    'status' => 'processed',
+                ]);
 
-            $pointsCount++;
+                $pointsCount++;
+            }
         }
 
         $analysisService = new DocumentAnalysisService();

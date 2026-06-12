@@ -58,17 +58,45 @@ class OpenAiProvider implements LlmProviderInterface
 
     public function embedding(string $text): array
     {
+        return $this->embeddingMany([$text])[0] ?? [];
+    }
+
+    public function embeddingMany(array $texts): array
+    {
+        $inputs = array_values(array_filter(array_map(
+            fn ($text): string => trim((string) $text),
+            $texts
+        ), fn (string $text): bool => $text !== ''));
+
+        if ($inputs === []) {
+            return [];
+        }
+
         $response = Http::withToken($this->apiKey)
-            ->timeout(30)
+            ->timeout((int) config('ai.embedding_request_timeout', 90))
+            ->retry(2, 1000)
             ->post('https://api.openai.com/v1/embeddings', [
                 'model' => $this->embeddingModel,
-                'input' => $text,
+                'input' => $inputs,
             ]);
 
         if ($response->failed()) {
-            throw new RuntimeException('OpenAI embedding request failed: ' . $response->status());
+            $body = mb_substr((string) $response->body(), 0, 500);
+
+            throw new RuntimeException('OpenAI embedding request failed: ' . $response->status() . ' ' . $body);
         }
 
-        return $response->json('data.0.embedding', []);
+        $data = $response->json('data', []);
+
+        if (! is_array($data)) {
+            throw new RuntimeException('OpenAI embedding response did not contain a valid data array.');
+        }
+
+        usort($data, fn (array $left, array $right): int => ((int) ($left['index'] ?? 0)) <=> ((int) ($right['index'] ?? 0)));
+
+        return array_values(array_map(
+            fn (array $item): array => is_array($item['embedding'] ?? null) ? $item['embedding'] : [],
+            $data
+        ));
     }
 }

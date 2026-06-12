@@ -7,6 +7,9 @@ return [
     'chat_model' => env('AI_CHAT_MODEL', 'gpt-4o-mini'),
     'embedding_model' => env('AI_EMBEDDING_MODEL', 'text-embedding-3-small'),
     'embedding_dimensions' => (int) env('AI_EMBEDDING_DIMENSIONS', 1536),
+    'embedding_batch_size' => (int) env('AI_EMBEDDING_BATCH_SIZE', 12),
+    'embedding_request_timeout' => (int) env('AI_EMBEDDING_REQUEST_TIMEOUT', 90),
+    'knowledge_processing_step_chunk_count' => (int) env('AI_KNOWLEDGE_STEP_CHUNK_COUNT', 4),
     'vector_store' => env('AI_VECTOR_STORE', 'auto'),
 
     'document_similarity_threshold' => (float) env('AI_DOCUMENT_SIMILARITY_THRESHOLD', 0.70),

@@ -5,9 +5,9 @@ namespace App\Http\Controllers\Admin\Web;
 use App\Enums\KnowledgeDocumentStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\Api\V1\KnowledgeDocumentResource;
-use App\Jobs\ProcessKnowledgeDocumentJob;
 use App\Models\KnowledgeDocument;
-use App\Services\Vector\Contracts\VectorStoreInterface;
+use App\Services\Knowledge\KnowledgeDocumentBackgroundLauncher;
+use App\Services\Knowledge\KnowledgeDocumentStepProcessor;
 use App\Services\Vector\VectorStoreManager;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -15,7 +15,6 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
 use RuntimeException;
-use Throwable;
 
 class AdminKnowledgeWebController extends Controller
 {
@@ -96,19 +95,28 @@ class AdminKnowledgeWebController extends Controller
         return back()->with('success', __('messages.saved_success'));
     }
 
-    public function reprocess(Request $request, KnowledgeDocument $knowledgeDocument): RedirectResponse
+    public function reprocess(Request $request, KnowledgeDocument $knowledgeDocument): JsonResponse|RedirectResponse
     {
         try {
             $knowledgeDocument = $this->runDocumentProcessing($request, $knowledgeDocument, true);
         } catch (RuntimeException $exception) {
+            if ($this->shouldUseJson($request)) {
+                return response()->json([
+                    'message' => $exception->getMessage(),
+                    'data' => (new KnowledgeDocumentResource($knowledgeDocument->fresh('uploadedBy')))->resolve(),
+                ], 409);
+            }
+
             return back()->with('error', $exception->getMessage());
         }
 
+        if ($this->shouldUseJson($request)) {
+            return response()->json((new KnowledgeDocumentResource($knowledgeDocument))->resolve());
+        }
+
         return back()->with(
-            $knowledgeDocument->status?->value === 'processed' ? 'success' : 'error',
-            $knowledgeDocument->status?->value === 'processed'
-                ? __('messages.updated_success')
-                : ($knowledgeDocument->processing_error ?: __('messages.failed'))
+            'success',
+            __('messages.processing_started')
         );
     }
 
@@ -131,13 +139,8 @@ class AdminKnowledgeWebController extends Controller
         $this->recoverStaleProcessingDocuments();
 
         if ($knowledgeDocument->canStopProcessing()) {
-            $knowledgeDocument->update([
-                'stop_requested_at' => now(),
-                'processing_error' => __('messages.stop_requested_message'),
-            ]);
+            $knowledgeDocument = app(KnowledgeDocumentStepProcessor::class)->requestStop($knowledgeDocument);
         }
-
-        $knowledgeDocument->refresh()->load('uploadedBy');
 
         if ($this->shouldUseJson($request)) {
             return response()->json([
@@ -154,13 +157,7 @@ class AdminKnowledgeWebController extends Controller
         $this->recoverStaleProcessingDocuments();
 
         $wasProcessing = $knowledgeDocument->canStopProcessing();
-
-        if ($wasProcessing) {
-            $knowledgeDocument->update([
-                'stop_requested_at' => now(),
-                'processing_error' => __('messages.processing_deleted_message'),
-            ]);
-        }
+        app(KnowledgeDocumentStepProcessor::class)->cleanupDocumentState($knowledgeDocument);
 
         $knowledgeDocument->delete();
 
@@ -215,7 +212,11 @@ class AdminKnowledgeWebController extends Controller
         $this->recoverStaleProcessingDocuments();
         $knowledgeDocument->refresh();
 
-        if ($knowledgeDocument->status === KnowledgeDocumentStatus::Processing) {
+        if (! $forceRestart && $knowledgeDocument->status === KnowledgeDocumentStatus::Processing) {
+            return $knowledgeDocument->load('uploadedBy');
+        }
+
+        if ($forceRestart && $knowledgeDocument->status === KnowledgeDocumentStatus::Processing) {
             throw new RuntimeException(__('messages.document_already_processing'));
         }
 
@@ -231,27 +232,9 @@ class AdminKnowledgeWebController extends Controller
             ]));
         }
 
-        if ($forceRestart || $knowledgeDocument->status !== KnowledgeDocumentStatus::Uploaded) {
-            $this->resetDocumentForProcessing($knowledgeDocument);
-        }
-
         $this->releaseSessionLock($request);
 
-        return ProcessKnowledgeDocumentJob::processNow($knowledgeDocument->id);
-    }
-
-    private function resetDocumentForProcessing(KnowledgeDocument $knowledgeDocument): void
-    {
-        $knowledgeDocument->update([
-            'status' => KnowledgeDocumentStatus::Uploaded->value,
-            'processing_error' => null,
-            'processing_started_at' => null,
-            'stop_requested_at' => null,
-            'processed_at' => null,
-            'qdrant_points_count' => 0,
-            'processed_chunks_count' => 0,
-            'total_chunks_count' => 0,
-        ]);
+        return app(KnowledgeDocumentBackgroundLauncher::class)->start($knowledgeDocument, $forceRestart);
     }
 
     private function releaseSessionLock(Request $request): void
@@ -286,14 +269,7 @@ class AdminKnowledgeWebController extends Controller
         }
 
         foreach ($documents as $document) {
-            try {
-                app(VectorStoreInterface::class)->deleteByFilter(
-                    $document->qdrant_collection ?: config('ai.qdrant_knowledge_collection'),
-                    ['knowledge_document_id' => $document->id]
-                );
-            } catch (Throwable) {
-                // Keep the stale-status recovery resilient even if cleanup fails.
-            }
+            app(KnowledgeDocumentStepProcessor::class)->cleanupDocumentState($document);
 
             $document->update([
                 'status' => $document->stop_requested_at

@@ -9,4 +9,6 @@ interface LlmProviderInterface
     public function chatJson(array $messages, array $schema = [], array $options = []): array;
 
     public function embedding(string $text): array;
+
+    public function embeddingMany(array $texts): array;
 }

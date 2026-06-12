@@ -444,6 +444,8 @@
         run_stopping: @json(__('messages.batch_stop_requested')),
         processing_progress: @json(__('messages.processing_progress_value', ['processed' => '__DONE__', 'total' => '__TOTAL__'])),
         processing_started: @json(__('messages.processing_started_label')),
+        preparing_chunks: @json(__('messages.processing_preparing_chunks')),
+        indexing_chunks: @json(__('messages.processing_indexing_chunks')),
         start_processing: @json(__('messages.start_processing')),
         stop_processing: @json(__('messages.stop_processing')),
         reprocess: @json(__('messages.reprocess_doc')),
@@ -627,6 +629,22 @@
             .replace('__TOTAL__', String(total || 0));
     }
 
+    function statusDetailMessage(docData) {
+        if (docData.processing_error) {
+            return docData.processing_error;
+        }
+
+        if (docData.status === 'processing' && Number(docData.total_chunks_count || 0) === 0) {
+            return labels.preparing_chunks;
+        }
+
+        if (docData.status === 'processing') {
+            return labels.indexing_chunks;
+        }
+
+        return '';
+    }
+
     function renderQueue() {
         if (state.items.length === 0) {
             batchList.innerHTML = `
@@ -747,8 +765,16 @@
     function buildStatusNotes(docData) {
         const notes = [];
 
+        if (docData.status === 'processing' && Number(docData.total_chunks_count || 0) === 0) {
+            notes.push(`<div class="table-status-note">${escapeHtml(labels.preparing_chunks)}</div>`);
+        }
+
         if (Number(docData.total_chunks_count || 0) > 0 && ['processing', 'processed', 'failed', 'cancelled'].includes(docData.status)) {
             notes.push(`<div class="table-status-note">${escapeHtml(progressLabel(docData.processed_chunks_count, docData.total_chunks_count))}</div>`);
+        }
+
+        if (docData.status === 'processing' && Number(docData.total_chunks_count || 0) > 0 && Number(docData.processed_chunks_count || 0) === 0) {
+            notes.push(`<div class="table-status-note">${escapeHtml(labels.indexing_chunks)}</div>`);
         }
 
         if (docData.status === 'processing' && docData.processing_started_at) {
@@ -906,7 +932,7 @@
         item.processingStartedAt = docData.processing_started_at || null;
         item.canStart = Boolean(docData.can_start_processing);
         item.canStop = Boolean(docData.can_stop_processing);
-        item.message = docData.processing_error || '';
+        item.message = statusDetailMessage(docData);
     }
 
     function extractRequestError(payload, fallback) {
@@ -952,6 +978,12 @@
         progressNote.textContent = error instanceof Error ? error.message : labels.failed;
     }
 
+    function wait(ms) {
+        return new Promise(function (resolve) {
+            window.setTimeout(resolve, ms);
+        });
+    }
+
     async function requestJson(url, options) {
         const response = await fetch(url, options);
         const payload = await response.json().catch(function () {
@@ -959,6 +991,27 @@
         });
 
         return { response, payload };
+    }
+
+    async function fetchStatusesByIds(documentIds) {
+        if (!Array.isArray(documentIds) || documentIds.length === 0) {
+            return [];
+        }
+
+        const { response, payload } = await requestJson(`${statusesUrl}?ids=${documentIds.join(',')}`, {
+            headers: {
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+        }).catch(function () {
+            return { response: null, payload: null };
+        });
+
+        if (!response || !response.ok || !payload || !Array.isArray(payload.data)) {
+            return [];
+        }
+
+        return payload.data;
     }
 
     async function uploadItem(item) {
@@ -1053,7 +1106,38 @@
         renderQueue();
         updateSummary();
 
-        return docData;
+        if (!docData || docData.status !== 'processing') {
+            return docData;
+        }
+
+        let latestDocData = docData;
+
+        while (!state.stopRequested) {
+            await wait(1500);
+
+            const documents = await fetchStatusesByIds([documentId]);
+            const currentDoc = Array.isArray(documents) && documents[0] ? documents[0] : null;
+
+            if (!currentDoc) {
+                continue;
+            }
+
+            latestDocData = currentDoc;
+            upsertKnowledgeTableRow(currentDoc);
+
+            if (item) {
+                updateItemFromDocument(item, currentDoc);
+            }
+
+            renderQueue();
+            updateSummary();
+
+            if (currentDoc.status !== 'processing') {
+                return latestDocData;
+            }
+        }
+
+        return latestDocData;
     }
 
     async function stopDocument(documentId) {
@@ -1282,21 +1366,14 @@
             return;
         }
 
-        const { response, payload } = await requestJson(`${statusesUrl}?ids=${ids.join(',')}`, {
-            headers: {
-                'Accept': 'application/json',
-                'X-Requested-With': 'XMLHttpRequest',
-            },
-        }).catch(function () {
-            return { response: null, payload: null };
-        });
+        const documents = await fetchStatusesByIds(ids);
 
-        if (!response || !response.ok || !payload || !Array.isArray(payload.data)) {
+        if (!Array.isArray(documents) || documents.length === 0) {
             stopStatusPollingIfIdle();
             return;
         }
 
-        payload.data.forEach(function (docData) {
+        documents.forEach(function (docData) {
             upsertKnowledgeTableRow(docData);
 
             const item = findItemByDocumentId(docData.id);
