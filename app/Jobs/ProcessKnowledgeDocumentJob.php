@@ -9,6 +9,7 @@ use App\Services\Documents\DocumentTextExtractor;
 use App\Services\Documents\TextChunker;
 use App\Services\Vector\Contracts\VectorStoreInterface;
 use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Bus\Dispatcher;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
@@ -25,6 +26,31 @@ class ProcessKnowledgeDocumentJob implements ShouldQueue
     public int $timeout = 300;
 
     public function __construct(private int $documentId) {}
+
+    public static function dispatchWithSyncFallback(int $documentId): void
+    {
+        $dispatcher = app(Dispatcher::class);
+        $job = new self($documentId);
+
+        try {
+            $dispatcher->dispatch($job);
+        } catch (Throwable) {
+            $dispatcher->dispatchSync($job);
+        }
+    }
+
+    public static function processNow(int $documentId): KnowledgeDocument
+    {
+        $job = new self($documentId);
+
+        try {
+            $job->handle();
+        } catch (Throwable $exception) {
+            $job->failed($exception);
+        }
+
+        return KnowledgeDocument::with('uploadedBy')->findOrFail($documentId);
+    }
 
     public function middleware(): array
     {

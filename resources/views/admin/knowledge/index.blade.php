@@ -299,6 +299,7 @@
     const storeUrl = @json(route('admin.knowledge.store'));
     const statusesUrl = @json(route('admin.knowledge.statuses'));
     const knowledgeBaseUrl = @json(route('admin.knowledge.index'));
+    const processNowUrlTemplate = @json(route('admin.knowledge.process-now', ['knowledgeDocument' => '__ID__']));
     const activeFilters = {
         status: @json((string) request('status')),
         category: @json(strtolower((string) request('category'))),
@@ -538,6 +539,15 @@
 
                 updateItemFromDocument(item, payload);
                 upsertKnowledgeTableRow(payload);
+
+                item.stage = 'processing';
+                item.message = '';
+                renderQueue();
+                updateSummary();
+
+                const processedPayload = await processUploadedDocument(item.documentId);
+                updateItemFromDocument(item, processedPayload);
+                upsertKnowledgeTableRow(processedPayload);
             } catch (error) {
                 item.stage = 'upload_failed';
                 item.message = error instanceof Error ? error.message : @json(__('messages.upload_failed'));
@@ -549,6 +559,27 @@
 
         state.isUploading = false;
         updateSummary();
+    }
+
+    async function processUploadedDocument(documentId) {
+        const processUrl = processNowUrlTemplate.replace('__ID__', String(documentId));
+
+        const response = await fetch(processUrl, {
+            method: 'POST',
+            headers: {
+                'Accept': 'application/json',
+                'X-CSRF-TOKEN': csrfToken,
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+        });
+
+        const payload = await response.json().catch(function () { return null; });
+
+        if (!response.ok || !payload) {
+            throw new Error(extractRequestError(payload));
+        }
+
+        return payload;
     }
 
     function updateItemFromDocument(item, docData) {

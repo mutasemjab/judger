@@ -42,10 +42,13 @@ class AdminKnowledgeWebController extends Controller
 
     public function store(Request $request)
     {
+        $isAsyncBatchRequest = $request->expectsJson() || $request->wantsJson() || $request->ajax();
+
         $request->validate([
             'file'     => KnowledgeDocument::uploadRules(),
             'title'    => 'nullable|string|max:255',
             'category' => 'nullable|string|max:100',
+            'process_now' => 'nullable|boolean',
         ]);
 
         $file     = $request->file('file');
@@ -64,9 +67,13 @@ class AdminKnowledgeWebController extends Controller
             'uploaded_by'   => Auth::guard('admin_web')->id(),
         ]);
 
-        ProcessKnowledgeDocumentJob::dispatch($document->id);
+        if ($request->boolean('process_now')) {
+            $document = ProcessKnowledgeDocumentJob::processNow($document->id);
+        } elseif (! $isAsyncBatchRequest) {
+            ProcessKnowledgeDocumentJob::dispatchWithSyncFallback($document->id);
+        }
 
-        if ($request->expectsJson() || $request->wantsJson() || $request->ajax()) {
+        if ($isAsyncBatchRequest) {
             return response()->json((new KnowledgeDocumentResource($document))->resolve(), 201);
         }
 
@@ -82,9 +89,30 @@ class AdminKnowledgeWebController extends Controller
             'qdrant_points_count' => 0,
         ]);
 
-        ProcessKnowledgeDocumentJob::dispatch($knowledgeDocument->id);
+        $knowledgeDocument = ProcessKnowledgeDocumentJob::processNow($knowledgeDocument->id);
 
-        return back()->with('success', __('messages.updated_success'));
+        return back()->with(
+            $knowledgeDocument->status?->value === 'processed' ? 'success' : 'error',
+            $knowledgeDocument->status?->value === 'processed'
+                ? __('messages.updated_success')
+                : ($knowledgeDocument->processing_error ?: __('messages.failed'))
+        );
+    }
+
+    public function processNow(KnowledgeDocument $knowledgeDocument): JsonResponse
+    {
+        if ($knowledgeDocument->status?->value !== 'processed') {
+            $knowledgeDocument->update([
+                'status' => 'uploaded',
+                'processing_error' => null,
+                'processed_at' => null,
+                'qdrant_points_count' => 0,
+            ]);
+        }
+
+        $document = ProcessKnowledgeDocumentJob::processNow($knowledgeDocument->id);
+
+        return response()->json((new KnowledgeDocumentResource($document))->resolve());
     }
 
     public function destroy(KnowledgeDocument $knowledgeDocument): RedirectResponse

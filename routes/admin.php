@@ -60,6 +60,7 @@ Route::prefix('admin')->name('admin.')->group(function () {
         Route::get('/knowledge', [AdminKnowledgeWebController::class, 'index'])->name('knowledge.index');
         Route::post('/knowledge', [AdminKnowledgeWebController::class, 'store'])->name('knowledge.store');
         Route::get('/knowledge/statuses', [AdminKnowledgeWebController::class, 'statuses'])->name('knowledge.statuses');
+        Route::post('/knowledge/{knowledgeDocument}/process-now', [AdminKnowledgeWebController::class, 'processNow'])->name('knowledge.process-now');
         Route::post('/knowledge/{knowledgeDocument}/reprocess', [AdminKnowledgeWebController::class, 'reprocess'])->name('knowledge.reprocess');
         Route::delete('/knowledge/{knowledgeDocument}', [AdminKnowledgeWebController::class, 'destroy'])->name('knowledge.destroy');
 
