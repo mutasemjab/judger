@@ -169,6 +169,12 @@ return [
     'uploading_now'     => 'Uploading',
     'waiting'           => 'Waiting',
     'upload_failed'     => 'Upload failed',
+    'index_engine'      => 'Index Engine',
+    'one_by_one_pipeline' => 'One-by-one indexing',
+    'semantic_chunking' => 'Semantic chunking',
+    'local_fallback_active' => 'Qdrant is unavailable, so indexing is using the local database fallback.',
+    'qdrant_active'     => 'Qdrant is connected and indexing is running through the vector server.',
+    'semantic_chunking_hint' => 'Documents are split by structure and sentence flow for cleaner retrieval.',
 
     // ── AI Tools ──────────────────────────────────────────────────────────
     'tool_type'         => 'Tool',

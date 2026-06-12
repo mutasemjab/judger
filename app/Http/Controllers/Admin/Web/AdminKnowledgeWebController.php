@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\Api\V1\KnowledgeDocumentResource;
 use App\Jobs\ProcessKnowledgeDocumentJob;
 use App\Models\KnowledgeDocument;
+use App\Services\Vector\VectorStoreManager;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -30,7 +31,13 @@ class AdminKnowledgeWebController extends Controller
             'failed' => KnowledgeDocument::query()->where('status', 'failed')->count(),
         ];
 
-        return view('admin.knowledge.index', compact('documents', 'stats'));
+        $vectorStore = app(VectorStoreManager::class);
+        $vectorIndex = [
+            'driver' => $vectorStore->driver(),
+            'label' => $vectorStore->label(),
+        ];
+
+        return view('admin.knowledge.index', compact('documents', 'stats', 'vectorIndex'));
     }
 
     public function store(Request $request)

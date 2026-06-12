@@ -791,6 +791,44 @@ body.rtl {
     margin-top: 6px;
 }
 
+.knowledge-pill-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.knowledge-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    border-radius: 999px;
+    padding: 6px 12px;
+    font-size: 0.74rem;
+    font-weight: 600;
+}
+
+.knowledge-pill-primary {
+    background: var(--primary-soft);
+    color: var(--primary);
+}
+
+.knowledge-pill-success {
+    background: var(--success-soft);
+    color: var(--success);
+}
+
+.knowledge-pill-warning {
+    background: var(--warning-soft);
+    color: var(--warning);
+}
+
+.knowledge-engine-note {
+    margin-top: 10px;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+}
+
 .knowledge-batch-layout {
     display: grid;
     grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.95fr);

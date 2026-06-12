@@ -66,6 +66,20 @@
         <div>
             <h3 class="admin-card-title"><i class="fas fa-layer-group"></i> {{ __('messages.batch_uploader') }}</h3>
             <div class="knowledge-batch-subtitle">{{ __('messages.batch_uploader_hint') }}</div>
+            <div class="knowledge-pill-list">
+                <span class="knowledge-pill knowledge-pill-{{ $vectorIndex['driver'] === 'qdrant' ? 'primary' : 'warning' }}">
+                    <i class="fas fa-database"></i>{{ __('messages.index_engine') }}: {{ $vectorIndex['label'] }}
+                </span>
+                <span class="knowledge-pill knowledge-pill-primary">
+                    <i class="fas fa-shuffle"></i>{{ __('messages.one_by_one_pipeline') }}
+                </span>
+                <span class="knowledge-pill knowledge-pill-success">
+                    <i class="fas fa-scissors"></i>{{ __('messages.semantic_chunking') }}
+                </span>
+            </div>
+            <div class="knowledge-engine-note">
+                {{ $vectorIndex['driver'] === 'qdrant' ? __('messages.qdrant_active') : __('messages.local_fallback_active') }}
+            </div>
         </div>
         <span class="badge bg-secondary" id="knowledgeBatchSelectedCount">0 {{ __('messages.total') }}</span>
     </div>
@@ -94,6 +108,10 @@
                     <div class="knowledge-field-help knowledge-field-help-inline">
                         <i class="fas fa-wand-magic-sparkles"></i>
                         <span>{{ __('messages.auto_titles_from_filename') }}</span>
+                    </div>
+                    <div class="knowledge-field-help knowledge-field-help-inline">
+                        <i class="fas fa-brain"></i>
+                        <span>{{ __('messages.semantic_chunking_hint') }}</span>
                     </div>
                 </div>
 
