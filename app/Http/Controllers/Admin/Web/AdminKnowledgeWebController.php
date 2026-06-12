@@ -134,6 +134,21 @@ class AdminKnowledgeWebController extends Controller
         return response()->json((new KnowledgeDocumentResource($document))->resolve());
     }
 
+    /**
+     * Process a single embedding batch for the given document.
+     *
+     * Called on every JS poll tick so processing works entirely via HTTP
+     * requests — no background/nohup process required. Safe to call
+     * concurrently: the internal cache lock ensures only one batch runs
+     * at a time and any other caller just gets the current status back.
+     */
+    public function step(KnowledgeDocument $knowledgeDocument): JsonResponse
+    {
+        $document = app(KnowledgeDocumentStepProcessor::class)->processNextStep($knowledgeDocument);
+
+        return response()->json((new KnowledgeDocumentResource($document))->resolve());
+    }
+
     public function stop(Request $request, KnowledgeDocument $knowledgeDocument): JsonResponse|RedirectResponse
     {
         $this->recoverStaleProcessingDocuments();

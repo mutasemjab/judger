@@ -518,6 +518,11 @@
     const storeUrl = @json(route('admin.knowledge.store'));
     const statusesUrl = @json(route('admin.knowledge.statuses'));
     const processNowUrlTemplate = @json(route('admin.knowledge.process-now', ['knowledgeDocument' => '__ID__']));
+    // Step URL: called on every poll tick while a document is processing.
+    // Each call runs exactly one embedding batch (4 chunks by default).
+    // This drives processing via normal HTTP requests so no background/nohup
+    // process is needed — works reliably on shared hosting.
+    const stepUrlTemplate = @json(route('admin.knowledge.step', ['knowledgeDocument' => '__ID__']));
     const stopUrlTemplate = @json(route('admin.knowledge.stop', ['knowledgeDocument' => '__ID__']));
     const reprocessUrlTemplate = @json(route('admin.knowledge.reprocess', ['knowledgeDocument' => '__ID__']));
     const destroyUrlTemplate = @json(route('admin.knowledge.destroy', ['knowledgeDocument' => '__ID__']));
@@ -1001,16 +1006,41 @@
         updateSummary();
         if (!docData || docData.status !== 'processing') { return docData; }
         let latestDocData = docData;
+
+        // Drive processing step-by-step via HTTP instead of relying on a
+        // background process. Each iteration POSTs to /step, which runs one
+        // embedding batch (≈4 chunks) and returns the updated document.
+        // Works on shared hosting where nohup/CLI background processes are
+        // unreliable or get killed mid-run.
+        const stepUrl = stepUrlTemplate.replace('__ID__', String(documentId));
+
         while (!state.stopRequested) {
             await wait(1500);
-            const documents = await fetchStatusesByIds([documentId]);
-            const currentDoc = Array.isArray(documents) && documents[0] ? documents[0] : null;
+
+            const { response: stepResponse, payload: stepPayload } = await requestJson(stepUrl, {
+                method: 'POST',
+                headers: { 'Accept': 'application/json', 'X-CSRF-TOKEN': csrfToken, 'X-Requested-With': 'XMLHttpRequest' },
+            }).catch(function () { return { response: null, payload: null }; });
+
+            // Fall back to a plain status poll if the step request itself fails
+            // (e.g. network hiccup). This avoids stopping the loop on transient errors.
+            let currentDoc = stepResponse && stepResponse.ok
+                ? extractDocumentPayload(stepPayload)
+                : null;
+
+            if (!currentDoc) {
+                const fallback = await fetchStatusesByIds([documentId]);
+                currentDoc = Array.isArray(fallback) && fallback[0] ? fallback[0] : null;
+            }
+
             if (!currentDoc) { continue; }
+
             latestDocData = currentDoc;
             upsertKnowledgeTableRow(currentDoc);
             if (item) { updateItemFromDocument(item, currentDoc); }
             renderQueue();
             updateSummary();
+
             if (currentDoc.status !== 'processing') { return latestDocData; }
         }
         return latestDocData;
