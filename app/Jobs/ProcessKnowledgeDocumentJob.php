@@ -17,6 +17,7 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
 use Throwable;
 
@@ -75,6 +76,14 @@ class ProcessKnowledgeDocumentJob implements ShouldQueue
     public function handle(): void
     {
         $document = KnowledgeDocument::findOrFail($this->documentId);
+        Log::info('knowledge.processing.started', [
+            'document_id' => $document->id,
+            'title' => $document->title,
+            'original_name' => $document->original_name,
+            'mime_type' => $document->mime_type,
+            'file_size' => $document->file_size,
+        ]);
+
         $document->update([
             'status' => KnowledgeDocumentStatus::Processing->value,
             'processing_error' => null,
@@ -95,15 +104,26 @@ class ProcessKnowledgeDocumentJob implements ShouldQueue
 
         $extractor = app(DocumentTextExtractor::class);
         $pages = $extractor->extract($document->file_path, $document->disk);
+        Log::info('knowledge.processing.extracted', [
+            'document_id' => $document->id,
+            'pages' => count($pages),
+            'non_empty_pages' => count(array_filter($pages, fn (array $page): bool => trim((string) ($page['text'] ?? '')) !== '')),
+        ]);
 
         $chunker = app(TextChunker::class);
         $chunks = array_values(array_filter(
             $chunker->chunk($pages),
             fn (array $chunk): bool => ! empty(trim((string) ($chunk['content'] ?? '')))
         ));
+        Log::info('knowledge.processing.chunked', [
+            'document_id' => $document->id,
+            'chunks' => count($chunks),
+            'first_chunk_words' => $chunks[0]['word_count'] ?? 0,
+            'last_chunk_words' => $chunks !== [] ? ($chunks[array_key_last($chunks)]['word_count'] ?? 0) : 0,
+        ]);
 
         if ($chunks === []) {
-            throw new RuntimeException('No readable text could be extracted from this document. Try a text-based PDF, DOCX, PPTX, or TXT file.');
+            throw new RuntimeException('No readable text could be extracted from this document. If this is a scanned PDF, enable OCR support with Arabic or English Tesseract language data on the server, or upload a text-based PDF, DOCX, PPTX, or TXT file.');
         }
 
         $document->update([
@@ -160,6 +180,11 @@ class ProcessKnowledgeDocumentJob implements ShouldQueue
             'processed_at' => now(),
             'processing_error' => null,
         ]);
+        Log::info('knowledge.processing.completed', [
+            'document_id' => $document->id,
+            'chunks_indexed' => $pointsCount,
+            'collection' => $collectionName,
+        ]);
     }
 
     private function abortIfStopRequested(string $collectionName): void
@@ -204,6 +229,10 @@ class ProcessKnowledgeDocumentJob implements ShouldQueue
             'processed_at' => null,
             'processing_error' => 'Processing stopped by admin.',
         ]);
+        Log::warning('knowledge.processing.cancelled', [
+            'document_id' => $document->id,
+            'collection' => $collectionName,
+        ]);
     }
 
     public function failed(Throwable $exception): void
@@ -231,6 +260,11 @@ class ProcessKnowledgeDocumentJob implements ShouldQueue
             'total_chunks_count' => 0,
             'stop_requested_at' => null,
             'processed_at' => null,
+        ]);
+        Log::error('knowledge.processing.failed', [
+            'document_id' => $document->id,
+            'message' => $exception->getMessage(),
+            'exception' => $exception::class,
         ]);
     }
 }

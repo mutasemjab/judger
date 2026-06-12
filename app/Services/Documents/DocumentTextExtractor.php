@@ -5,8 +5,10 @@ namespace App\Services\Documents;
 use DOMDocument;
 use DOMXPath;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
 use Smalot\PdfParser\Parser;
+use Throwable;
 use ZipArchive;
 
 class DocumentTextExtractor
@@ -54,33 +56,36 @@ class DocumentTextExtractor
 
     private function extractPdf(string $path): array
     {
-        try {
-            $parser = new Parser();
-            $pdf = $parser->parseFile($path);
-            $pages = $pdf->getPages();
+        $strategies = [
+            'pdf_parser' => fn (): array => $this->extractPdfWithParser($path),
+            'pdftotext' => fn (): array => $this->extractPdfWithPdftotext($path),
+            'ghostscript_txtwrite' => fn (): array => $this->extractPdfWithGhostscriptText($path),
+            'ocr_fallback' => fn (): array => $this->extractPdfWithOcr($path),
+        ];
 
-            if (empty($pages)) {
-                return [['page' => 1, 'text' => $pdf->getText()]];
-            }
+        foreach ($strategies as $strategyName => $strategy) {
+            try {
+                $pages = $strategy();
 
-            $result = [];
-            foreach ($pages as $index => $page) {
-                $text = $this->normalizeBlockText((string) $page->getText());
+                if ($this->hasMeaningfulText($pages)) {
+                    $this->logExtractionResult($path, $strategyName, $pages, 'success');
 
-                if ($text === '') {
-                    continue;
+                    return $pages;
                 }
 
-                $result[] = [
-                    'page' => $index + 1,
-                    'text' => $text,
-                ];
-            }
+                $this->logExtractionResult($path, $strategyName, $pages, 'empty');
+            } catch (Throwable) {
+                $this->logExtractionResult($path, $strategyName, [], 'failed');
 
-            return $result !== [] ? $result : [['page' => 1, 'text' => $this->normalizeBlockText((string) $pdf->getText())]];
-        } catch (\Throwable $e) {
-            return [['page' => 1, 'text' => '']];
+                continue;
+            }
         }
+
+        Log::warning('knowledge.extractor.pdf_failed', [
+            'file' => basename($path),
+        ]);
+
+        return [['page' => 1, 'text' => '']];
     }
 
     private function extractDocx(string $path): array
@@ -249,7 +254,10 @@ class DocumentTextExtractor
 
     private function normalizeBlockText(string $text): string
     {
+        $text = $this->normalizeUnicodeText($text);
         $text = str_replace(["\r\n", "\r"], "\n", $text);
+        $text = preg_replace('/[\x{200E}\x{200F}\x{202A}-\x{202E}\x{2066}-\x{2069}]/u', '', $text) ?? $text;
+        $text = str_replace('ـ', '', $text);
         $text = preg_replace('/[ \t]+/u', ' ', $text) ?? $text;
         $text = preg_replace("/\n{3,}/u", "\n\n", $text) ?? $text;
 
@@ -258,8 +266,380 @@ class DocumentTextExtractor
 
     private function normalizeInlineText(string $text): string
     {
+        $text = $this->normalizeUnicodeText($text);
+        $text = preg_replace('/[\x{200E}\x{200F}\x{202A}-\x{202E}\x{2066}-\x{2069}]/u', '', $text) ?? $text;
+        $text = str_replace('ـ', '', $text);
         $text = preg_replace('/\s+/u', ' ', $text) ?? $text;
 
         return trim($text);
+    }
+
+    private function extractPdfWithParser(string $path): array
+    {
+        $parser = new Parser();
+        $pdf = $parser->parseFile($path);
+        $pages = $pdf->getPages();
+
+        if (empty($pages)) {
+            return [[
+                'page' => 1,
+                'text' => $this->normalizeBlockText((string) $pdf->getText()),
+            ]];
+        }
+
+        $result = [];
+
+        foreach ($pages as $index => $page) {
+            $text = $this->normalizeBlockText((string) $page->getText());
+
+            if ($text === '') {
+                continue;
+            }
+
+            $result[] = [
+                'page' => $index + 1,
+                'text' => $text,
+            ];
+        }
+
+        return $result;
+    }
+
+    private function extractPdfWithPdftotext(string $path): array
+    {
+        if (! $this->commandExists('pdftotext')) {
+            return [];
+        }
+
+        $outputFile = tempnam(sys_get_temp_dir(), 'kb-pdftotext-');
+
+        if ($outputFile === false) {
+            return [];
+        }
+
+        try {
+            $this->runCommand([
+                'pdftotext',
+                '-layout',
+                '-enc',
+                'UTF-8',
+                $path,
+                $outputFile,
+            ]);
+
+            $text = @file_get_contents($outputFile) ?: '';
+
+            return $this->pagesFromFlatText($text);
+        } finally {
+            @unlink($outputFile);
+        }
+    }
+
+    private function extractPdfWithGhostscriptText(string $path): array
+    {
+        if (! $this->commandExists('gs')) {
+            return [];
+        }
+
+        $tempDir = $this->makeTempDirectory('kb-gs-text-');
+        $outputPattern = $tempDir . DIRECTORY_SEPARATOR . 'page-%03d.txt';
+
+        try {
+            $this->runCommand([
+                'gs',
+                '-q',
+                '-dSAFER',
+                '-dBATCH',
+                '-dNOPAUSE',
+                '-sDEVICE=txtwrite',
+                '-sOutputFile=' . $outputPattern,
+                $path,
+            ]);
+
+            return $this->pagesFromGeneratedFiles($tempDir, '*.txt');
+        } finally {
+            $this->deleteDirectory($tempDir);
+        }
+    }
+
+    private function extractPdfWithOcr(string $path): array
+    {
+        if (! $this->commandExists('gs') || ! $this->commandExists('tesseract')) {
+            return [];
+        }
+
+        $language = $this->resolveTesseractLanguage();
+
+        if ($language === null) {
+            return [];
+        }
+
+        $tempDir = $this->makeTempDirectory('kb-ocr-');
+        $imagePattern = $tempDir . DIRECTORY_SEPARATOR . 'page-%03d.png';
+
+        try {
+            $this->runCommand([
+                'gs',
+                '-q',
+                '-dSAFER',
+                '-dBATCH',
+                '-dNOPAUSE',
+                '-sDEVICE=png16m',
+                '-r180',
+                '-sOutputFile=' . $imagePattern,
+                $path,
+            ]);
+
+            $images = glob($tempDir . DIRECTORY_SEPARATOR . 'page-*.png') ?: [];
+            sort($images);
+
+            $pages = [];
+
+            foreach ($images as $index => $imagePath) {
+                $text = $this->runCommand([
+                    'tesseract',
+                    $imagePath,
+                    'stdout',
+                    '-l',
+                    $language,
+                    '--psm',
+                    '3',
+                ]);
+
+                $normalized = $this->normalizeBlockText($text);
+
+                if ($normalized === '') {
+                    continue;
+                }
+
+                $pages[] = [
+                    'page' => $index + 1,
+                    'text' => $normalized,
+                ];
+            }
+
+            return $pages;
+        } finally {
+            $this->deleteDirectory($tempDir);
+        }
+    }
+
+    private function pagesFromFlatText(string $text): array
+    {
+        $pages = [];
+        $chunks = preg_split("/\f/u", $text) ?: [$text];
+
+        foreach ($chunks as $index => $chunk) {
+            $normalized = $this->normalizeBlockText($chunk);
+
+            if ($normalized === '') {
+                continue;
+            }
+
+            $pages[] = [
+                'page' => $index + 1,
+                'text' => $normalized,
+            ];
+        }
+
+        return $pages;
+    }
+
+    private function pagesFromGeneratedFiles(string $directory, string $pattern): array
+    {
+        $files = glob($directory . DIRECTORY_SEPARATOR . $pattern) ?: [];
+        sort($files);
+
+        $pages = [];
+
+        foreach ($files as $index => $file) {
+            $text = @file_get_contents($file) ?: '';
+            $normalized = $this->normalizeBlockText($text);
+
+            if ($normalized === '') {
+                continue;
+            }
+
+            $pages[] = [
+                'page' => $index + 1,
+                'text' => $normalized,
+            ];
+        }
+
+        return $pages;
+    }
+
+    private function hasMeaningfulText(array $pages): bool
+    {
+        $text = $this->normalizeBlockText(implode("\n\n", array_map(
+            fn (array $page): string => (string) ($page['text'] ?? ''),
+            $pages
+        )));
+
+        if ($text === '') {
+            return false;
+        }
+
+        preg_match_all('/[\p{L}\p{N}]/u', $text, $matches);
+        $lettersAndNumbers = count($matches[0] ?? []);
+        $words = preg_split('/\s+/u', $text) ?: [];
+        $meaningfulWords = count(array_filter($words, fn (string $word): bool => $word !== ''));
+
+        return $lettersAndNumbers >= 40 && $meaningfulWords >= 10;
+    }
+
+    private function resolveTesseractLanguage(): ?string
+    {
+        static $language = false;
+
+        if ($language !== false) {
+            return $language ?: null;
+        }
+
+        $output = $this->runCommand(['tesseract', '--list-langs'], throwOnFailure: false);
+
+        if ($output === null) {
+            $language = '';
+
+            return null;
+        }
+
+        $available = array_map('trim', preg_split('/\R/u', $output) ?: []);
+
+        $language = match (true) {
+            in_array('ara', $available, true) && in_array('eng', $available, true) => 'ara+eng',
+            in_array('ara', $available, true) => 'ara',
+            in_array('eng', $available, true) => 'eng',
+            default => '',
+        };
+
+        if ($language === 'eng') {
+            Log::warning('knowledge.extractor.ocr_arabic_missing', [
+                'available_languages' => $available,
+            ]);
+        }
+
+        return $language ?: null;
+    }
+
+    private function commandExists(string $command): bool
+    {
+        static $cache = [];
+
+        if (array_key_exists($command, $cache)) {
+            return $cache[$command];
+        }
+
+        $result = $this->runCommand(['sh', '-lc', 'command -v ' . escapeshellarg($command)], throwOnFailure: false);
+
+        return $cache[$command] = is_string($result) && trim($result) !== '';
+    }
+
+    private function runCommand(array $command, bool $throwOnFailure = true): ?string
+    {
+        if (! function_exists('proc_open')) {
+            return null;
+        }
+
+        $escapedCommand = implode(' ', array_map('escapeshellarg', $command));
+        $descriptorSpec = [
+            1 => ['pipe', 'w'],
+            2 => ['pipe', 'w'],
+        ];
+
+        $process = @proc_open($escapedCommand, $descriptorSpec, $pipes);
+
+        if (! is_resource($process)) {
+            return null;
+        }
+
+        $stdout = stream_get_contents($pipes[1]) ?: '';
+        fclose($pipes[1]);
+
+        $stderr = stream_get_contents($pipes[2]) ?: '';
+        fclose($pipes[2]);
+
+        $exitCode = proc_close($process);
+
+        if ($exitCode !== 0 && $throwOnFailure) {
+            throw new RuntimeException(trim($stderr) !== '' ? trim($stderr) : ('Command failed: ' . $escapedCommand));
+        }
+
+        if ($exitCode !== 0) {
+            return null;
+        }
+
+        return $stdout;
+    }
+
+    private function makeTempDirectory(string $prefix): string
+    {
+        $base = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR);
+        $directory = $base . DIRECTORY_SEPARATOR . $prefix . bin2hex(random_bytes(8));
+
+        if (! @mkdir($directory, 0777, true) && ! is_dir($directory)) {
+            throw new RuntimeException('Unable to create temporary directory for document extraction.');
+        }
+
+        return $directory;
+    }
+
+    private function deleteDirectory(string $directory): void
+    {
+        if (! is_dir($directory)) {
+            return;
+        }
+
+        $items = scandir($directory) ?: [];
+
+        foreach ($items as $item) {
+            if ($item === '.' || $item === '..') {
+                continue;
+            }
+
+            $path = $directory . DIRECTORY_SEPARATOR . $item;
+
+            if (is_dir($path)) {
+                $this->deleteDirectory($path);
+            } else {
+                @unlink($path);
+            }
+        }
+
+        @rmdir($directory);
+    }
+
+    private function normalizeUnicodeText(string $text): string
+    {
+        if (class_exists(\Normalizer::class)) {
+            $normalized = \Normalizer::normalize($text, \Normalizer::FORM_KC);
+
+            if (is_string($normalized)) {
+                return $normalized;
+            }
+        }
+
+        return $text;
+    }
+
+    private function logExtractionResult(string $path, string $strategyName, array $pages, string $status): void
+    {
+        $nonEmptyPages = array_values(array_filter($pages, function (array $page): bool {
+            return trim((string) ($page['text'] ?? '')) !== '';
+        }));
+
+        $characterCount = mb_strlen(implode("\n", array_map(
+            fn (array $page): string => (string) ($page['text'] ?? ''),
+            $nonEmptyPages
+        )));
+
+        Log::info('knowledge.extractor.pdf_strategy', [
+            'file' => basename($path),
+            'strategy' => $strategyName,
+            'status' => $status,
+            'pages' => count($pages),
+            'non_empty_pages' => count($nonEmptyPages),
+            'characters' => $characterCount,
+        ]);
     }
 }

@@ -298,6 +298,7 @@
                     @endphp
                     <tr
                         id="knowledge-doc-row-{{ $doc->id }}"
+                        class="knowledge-doc-row knowledge-doc-row--{{ $statusValue }}"
                         data-knowledge-row="{{ $doc->id }}"
                         data-status="{{ $statusValue }}"
                         data-category="{{ strtolower((string) $doc->category) }}"
@@ -638,7 +639,7 @@
             return;
         }
 
-        batchList.innerHTML = state.items.map(function (item) {
+        batchList.innerHTML = state.items.map(function (item, index) {
             const metaBits = [
                 item.title,
                 item.size ? formatBytes(item.size) : null,
@@ -659,7 +660,7 @@
                 : '';
 
             return `
-                <div class="knowledge-batch-item" data-queue-item="${escapeHtml(item.localId)}">
+                <div class="knowledge-batch-item knowledge-batch-item--${escapeHtml(item.stage)}" data-queue-item="${escapeHtml(item.localId)}" style="--queue-index:${index};">
                     <div class="knowledge-batch-item-main">
                         <div class="knowledge-batch-item-name">${escapeHtml(item.originalName)}</div>
                         <div class="knowledge-batch-item-meta">${metaBits.map(escapeHtml).join(' · ')}</div>
@@ -804,6 +805,7 @@
         return `
             <tr
                 id="knowledge-doc-row-${docData.id}"
+                class="knowledge-doc-row knowledge-doc-row--${escapeHtml(docData.status)}"
                 data-knowledge-row="${docData.id}"
                 data-status="${escapeHtml(docData.status)}"
                 data-category="${escapeHtml(String(docData.category || '').toLowerCase())}"
