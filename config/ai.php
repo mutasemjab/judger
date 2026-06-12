@@ -8,7 +8,8 @@ return [
     'embedding_model' => env('AI_EMBEDDING_MODEL', 'text-embedding-3-small'),
     'embedding_dimensions' => (int) env('AI_EMBEDDING_DIMENSIONS', 1536),
     'embedding_batch_size' => (int) env('AI_EMBEDDING_BATCH_SIZE', 12),
-    'embedding_request_timeout' => (int) env('AI_EMBEDDING_REQUEST_TIMEOUT', 90),
+    'embedding_connect_timeout' => (int) env('AI_EMBEDDING_CONNECT_TIMEOUT', 15),
+    'embedding_request_timeout' => (int) env('AI_EMBEDDING_REQUEST_TIMEOUT', 45),
     'knowledge_processing_step_chunk_count' => (int) env('AI_KNOWLEDGE_STEP_CHUNK_COUNT', 4),
     'vector_store' => env('AI_VECTOR_STORE', 'auto'),
 

@@ -22,6 +22,7 @@ class OpenAiProvider implements LlmProviderInterface
     public function chat(array $messages, array $options = []): string
     {
         $response = Http::withToken($this->apiKey)
+            ->connectTimeout(15)
             ->timeout(60)
             ->post('https://api.openai.com/v1/chat/completions', array_merge([
                 'model' => $options['model'] ?? $this->chatModel,
@@ -40,6 +41,7 @@ class OpenAiProvider implements LlmProviderInterface
     public function chatJson(array $messages, array $schema = [], array $options = []): array
     {
         $response = Http::withToken($this->apiKey)
+            ->connectTimeout(15)
             ->timeout(60)
             ->post('https://api.openai.com/v1/chat/completions', [
                 'model' => $options['model'] ?? $this->chatModel,
@@ -72,9 +74,16 @@ class OpenAiProvider implements LlmProviderInterface
             return [];
         }
 
+        // connectTimeout caps the TLS/TCP handshake itself.
+        // Without it, a hung connection (firewall intercept, proxy stall) can
+        // bypass the transfer timeout and hang the process indefinitely.
+        $connectTimeout = (int) config('ai.embedding_connect_timeout', 15);
+        $transferTimeout = (int) config('ai.embedding_request_timeout', 45);
+
         $response = Http::withToken($this->apiKey)
-            ->timeout((int) config('ai.embedding_request_timeout', 90))
-            ->retry(2, 1000)
+            ->connectTimeout($connectTimeout)
+            ->timeout($transferTimeout)
+            ->retry(1, 500)   // one retry only — fast failure is better than 3× hang
             ->post('https://api.openai.com/v1/embeddings', [
                 'model' => $this->embeddingModel,
                 'input' => $inputs,
