@@ -8,6 +8,7 @@ enum KnowledgeDocumentStatus: string
     case Processing = 'processing';
     case Processed = 'processed';
     case Failed = 'failed';
+    case Cancelled = 'cancelled';
 
     public static function values(): array
     {

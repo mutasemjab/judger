@@ -22,12 +22,15 @@ class KnowledgeDocument extends Model
     protected $fillable = [
         'title', 'original_name', 'file_name', 'file_path', 'disk',
         'mime_type', 'file_size', 'category', 'status', 'uploaded_by',
-        'qdrant_collection', 'qdrant_points_count', 'processing_error', 'processed_at',
+        'qdrant_collection', 'qdrant_points_count', 'processed_chunks_count', 'total_chunks_count',
+        'processing_error', 'processing_started_at', 'stop_requested_at', 'processed_at',
     ];
 
     protected $hidden = ['file_path'];
 
     protected $casts = [
+        'processing_started_at' => 'datetime',
+        'stop_requested_at' => 'datetime',
         'processed_at' => 'datetime',
         'status' => KnowledgeDocumentStatus::class,
     ];
@@ -77,5 +80,19 @@ class KnowledgeDocument extends Model
             ->title());
 
         return $fallback !== '' ? $fallback : 'Untitled Document';
+    }
+
+    public function canStartProcessing(): bool
+    {
+        return in_array($this->status?->value, [
+            KnowledgeDocumentStatus::Uploaded->value,
+            KnowledgeDocumentStatus::Failed->value,
+            KnowledgeDocumentStatus::Cancelled->value,
+        ], true);
+    }
+
+    public function canStopProcessing(): bool
+    {
+        return $this->status?->value === KnowledgeDocumentStatus::Processing->value;
     }
 }

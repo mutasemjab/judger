@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Exceptions\KnowledgeProcessingStoppedException;
 use App\Enums\KnowledgeDocumentStatus;
 use App\Models\KnowledgeDocument;
 use App\Services\AI\AiProviderManager;
@@ -15,6 +16,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Cache;
 use RuntimeException;
 use Throwable;
 
@@ -42,11 +44,20 @@ class ProcessKnowledgeDocumentJob implements ShouldQueue
     public static function processNow(int $documentId): KnowledgeDocument
     {
         $job = new self($documentId);
+        $lock = Cache::lock('knowledge-document-ingestion-sync', $job->timeout + 60);
+
+        if (! $lock->get()) {
+            return KnowledgeDocument::with('uploadedBy')->findOrFail($documentId);
+        }
 
         try {
-            $job->handle();
-        } catch (Throwable $exception) {
-            $job->failed($exception);
+            try {
+                $job->handle();
+            } catch (Throwable $exception) {
+                $job->failed($exception);
+            }
+        } finally {
+            $lock->release();
         }
 
         return KnowledgeDocument::with('uploadedBy')->findOrFail($documentId);
@@ -67,8 +78,12 @@ class ProcessKnowledgeDocumentJob implements ShouldQueue
         $document->update([
             'status' => KnowledgeDocumentStatus::Processing->value,
             'processing_error' => null,
+            'processing_started_at' => now(),
+            'stop_requested_at' => null,
             'processed_at' => null,
             'qdrant_points_count' => 0,
+            'processed_chunks_count' => 0,
+            'total_chunks_count' => 0,
         ]);
 
         $collectionName = config('ai.qdrant_knowledge_collection');
@@ -91,37 +106,103 @@ class ProcessKnowledgeDocumentJob implements ShouldQueue
             throw new RuntimeException('No readable text could be extracted from this document. Try a text-based PDF, DOCX, PPTX, or TXT file.');
         }
 
+        $document->update([
+            'total_chunks_count' => count($chunks),
+        ]);
+
         $provider = AiProviderManager::resolve();
         $pointsCount = 0;
 
-        foreach ($chunks as $chunk) {
-            $embedding = $provider->embedding($chunk['content']);
-            $pointId = "kb_{$document->id}_{$chunk['chunk_index']}";
+        try {
+            foreach ($chunks as $chunk) {
+                $this->abortIfStopRequested($collectionName);
 
-            $vectorStore->upsertPoint($collectionName, $pointId, $embedding, [
-                'source_type' => 'knowledge_base',
-                'knowledge_document_id' => $document->id,
-                'document_name' => $document->original_name,
-                'title' => $document->title,
-                'category' => $document->category ?? 'general',
-                'page_number' => $chunk['page_number'],
-                'end_page_number' => $chunk['end_page_number'] ?? $chunk['page_number'],
-                'chunk_index' => $chunk['chunk_index'],
-                'content' => $chunk['content'],
-                'snippet' => $chunk['snippet'],
-                'word_count' => $chunk['word_count'] ?? null,
-                'status' => 'processed',
-            ]);
+                $embedding = $provider->embedding($chunk['content']);
+                $pointId = "kb_{$document->id}_{$chunk['chunk_index']}";
 
-            $pointsCount++;
+                $vectorStore->upsertPoint($collectionName, $pointId, $embedding, [
+                    'source_type' => 'knowledge_base',
+                    'knowledge_document_id' => $document->id,
+                    'document_name' => $document->original_name,
+                    'title' => $document->title,
+                    'category' => $document->category ?? 'general',
+                    'page_number' => $chunk['page_number'],
+                    'end_page_number' => $chunk['end_page_number'] ?? $chunk['page_number'],
+                    'chunk_index' => $chunk['chunk_index'],
+                    'content' => $chunk['content'],
+                    'snippet' => $chunk['snippet'],
+                    'word_count' => $chunk['word_count'] ?? null,
+                    'status' => 'processed',
+                ]);
+
+                $pointsCount++;
+
+                KnowledgeDocument::query()
+                    ->whereKey($document->id)
+                    ->update([
+                        'qdrant_points_count' => $pointsCount,
+                        'processed_chunks_count' => $pointsCount,
+                    ]);
+            }
+        } catch (KnowledgeProcessingStoppedException) {
+            $this->markAsCancelled($collectionName);
+
+            return;
         }
 
+        $document->refresh();
         $document->update([
             'status' => KnowledgeDocumentStatus::Processed->value,
             'qdrant_collection' => $collectionName,
             'qdrant_points_count' => $pointsCount,
+            'processed_chunks_count' => $pointsCount,
+            'stop_requested_at' => null,
             'processed_at' => now(),
             'processing_error' => null,
+        ]);
+    }
+
+    private function abortIfStopRequested(string $collectionName): void
+    {
+        $document = KnowledgeDocument::withTrashed()->find($this->documentId);
+
+        if (! $document) {
+            throw new KnowledgeProcessingStoppedException('Knowledge document no longer exists.');
+        }
+
+        if ($document->trashed() || $document->stop_requested_at !== null) {
+            try {
+                app(VectorStoreInterface::class)->deleteByFilter(
+                    $collectionName,
+                    ['knowledge_document_id' => $this->documentId]
+                );
+            } catch (Throwable) {
+                // Best effort cleanup before cancellation.
+            }
+
+            throw new KnowledgeProcessingStoppedException('Processing stopped by admin.');
+        }
+    }
+
+    private function markAsCancelled(string $collectionName): void
+    {
+        $document = KnowledgeDocument::withTrashed()->find($this->documentId);
+
+        if (! $document) {
+            return;
+        }
+
+        if ($document->trashed()) {
+            return;
+        }
+
+        $document->update([
+            'status' => KnowledgeDocumentStatus::Cancelled->value,
+            'qdrant_collection' => $collectionName,
+            'qdrant_points_count' => 0,
+            'processed_chunks_count' => 0,
+            'processed_at' => null,
+            'processing_error' => 'Processing stopped by admin.',
         ]);
     }
 
@@ -136,10 +217,19 @@ class ProcessKnowledgeDocumentJob implements ShouldQueue
             // Ignore cleanup failures and preserve the original processing error.
         }
 
-        KnowledgeDocument::where('id', $this->documentId)->update([
+        $document = KnowledgeDocument::withTrashed()->find($this->documentId);
+
+        if (! $document || $document->trashed()) {
+            return;
+        }
+
+        $document->update([
             'status' => KnowledgeDocumentStatus::Failed->value,
             'processing_error' => $exception->getMessage(),
             'qdrant_points_count' => 0,
+            'processed_chunks_count' => 0,
+            'total_chunks_count' => 0,
+            'stop_requested_at' => null,
             'processed_at' => null,
         ]);
     }
