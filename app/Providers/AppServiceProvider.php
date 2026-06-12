@@ -8,8 +8,7 @@ use App\Services\Subscriptions\FeatureGateService;
 use App\Services\Subscriptions\SubscriptionService;
 use App\Services\Subscriptions\UsageService;
 use App\Services\Vector\Contracts\VectorStoreInterface;
-use App\Services\Vector\FakeVectorStore;
-use App\Services\Vector\QdrantVectorStore;
+use App\Services\Vector\VectorStoreManager;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -20,11 +19,10 @@ class AppServiceProvider extends ServiceProvider
             return AiProviderManager::resolve();
         });
 
-        $this->app->singleton(VectorStoreInterface::class, function () {
-            if (app()->environment('testing')) {
-                return new FakeVectorStore();
-            }
-            return new QdrantVectorStore();
+        $this->app->scoped(VectorStoreManager::class);
+
+        $this->app->scoped(VectorStoreInterface::class, function () {
+            return app(VectorStoreManager::class)->resolve();
         });
 
         $this->app->singleton(SubscriptionService::class);

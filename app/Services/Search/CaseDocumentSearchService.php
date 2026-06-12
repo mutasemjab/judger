@@ -3,11 +3,11 @@
 namespace App\Services\Search;
 
 use App\Services\AI\AiProviderManager;
-use App\Services\Vector\QdrantVectorStore;
+use App\Services\Vector\Contracts\VectorStoreInterface;
 
 class CaseDocumentSearchService
 {
-    public function search(int $userId, int $legalCaseId, string $question, int $limit = null): array
+    public function search(int $userId, int $legalCaseId, string $question, ?int $limit = null): array
     {
         $limit = $limit ?? config('ai.max_case_document_chunks', 8);
         $threshold = config('ai.document_similarity_threshold', 0.70);
@@ -15,7 +15,7 @@ class CaseDocumentSearchService
         $provider = AiProviderManager::resolve();
         $embedding = $provider->embedding($question);
 
-        $vectorStore = new QdrantVectorStore();
+        $vectorStore = app(VectorStoreInterface::class);
         $collectionName = config('ai.qdrant_case_collection');
 
         $results = $vectorStore->search($collectionName, $embedding, $limit, [

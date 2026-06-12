@@ -5,6 +5,7 @@ namespace App\Services\Vector;
 use App\Services\Vector\Contracts\VectorStoreInterface;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
+use Throwable;
 
 class QdrantVectorStore implements VectorStoreInterface
 {
@@ -103,5 +104,19 @@ class QdrantVectorStore implements VectorStoreInterface
             ];
         }
         return ['must' => $must];
+    }
+
+    public function isAvailable(): bool
+    {
+        try {
+            $response = Http::timeout(2)
+                ->baseUrl($this->baseUrl)
+                ->when($this->apiKey, fn ($http) => $http->withHeaders(['api-key' => $this->apiKey]))
+                ->get('/collections');
+
+            return $response->successful();
+        } catch (Throwable) {
+            return false;
+        }
     }
 }

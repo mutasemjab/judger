@@ -7,6 +7,7 @@ return [
     'chat_model' => env('AI_CHAT_MODEL', 'gpt-4o-mini'),
     'embedding_model' => env('AI_EMBEDDING_MODEL', 'text-embedding-3-small'),
     'embedding_dimensions' => (int) env('AI_EMBEDDING_DIMENSIONS', 1536),
+    'vector_store' => env('AI_VECTOR_STORE', 'auto'),
 
     'document_similarity_threshold' => (float) env('AI_DOCUMENT_SIMILARITY_THRESHOLD', 0.70),
 

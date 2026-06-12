@@ -10,7 +10,7 @@ use App\Services\AI\AiProviderManager;
 use App\Services\Documents\DocumentAnalysisService;
 use App\Services\Documents\DocumentTextExtractor;
 use App\Services\Documents\TextChunker;
-use App\Services\Vector\QdrantVectorStore;
+use App\Services\Vector\Contracts\VectorStoreInterface;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -35,11 +35,11 @@ class ProcessCaseDocumentJob implements ShouldQueue
         $collectionName = config('ai.qdrant_case_collection');
         $vectorSize = config('ai.embedding_dimensions', 1536);
 
-        $vectorStore = new QdrantVectorStore();
+        $vectorStore = app(VectorStoreInterface::class);
         $vectorStore->ensureCollection($collectionName, $vectorSize);
         $vectorStore->deleteByFilter($collectionName, ['case_document_id' => $document->id]);
 
-        $extractor = new DocumentTextExtractor();
+        $extractor = app(DocumentTextExtractor::class);
         $pages = $extractor->extract($document->file_path, $document->disk);
 
         $fullText = implode("\n\n", array_column($pages, 'text'));
@@ -47,7 +47,7 @@ class ProcessCaseDocumentJob implements ShouldQueue
             $document->update(['extracted_text' => mb_substr($fullText, 0, 65000)]);
         }
 
-        $chunker = new TextChunker();
+        $chunker = app(TextChunker::class);
         $chunks = $chunker->chunk($pages);
 
         $provider = AiProviderManager::resolve();
