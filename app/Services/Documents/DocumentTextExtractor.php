@@ -318,11 +318,12 @@ class DocumentTextExtractor
         }
 
         try {
+            // Do NOT use -layout: it reverses Arabic RTL word order by placing
+            // text at physical X-column positions, which scrambles right-to-left lines.
             $this->runCommand([
                 'pdftotext',
-                '-layout',
-                '-enc',
-                'UTF-8',
+                '-enc', 'UTF-8',
+                '-nopgbrk',
                 $path,
                 $outputFile,
             ]);

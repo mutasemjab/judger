@@ -103,7 +103,9 @@ class TextChunker
             return [$text];
         }
 
-        $sentences = preg_split('/(?<=[\.\!\?؟۔])\s+/u', $text) ?: [$text];
+        // ؟ = Arabic question mark, ؛ = Arabic semicolon (common in legal Arabic text),
+        // ۔ = Urdu full stop. All are valid sentence boundaries in Arabic documents.
+        $sentences = preg_split('/(?<=[\.\!\?؟؛۔])\s+/u', $text) ?: [$text];
 
         if (count($sentences) <= 1) {
             return $this->splitByWords($text, $this->targetWords);
