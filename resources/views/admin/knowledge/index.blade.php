@@ -22,41 +22,43 @@
     </button>
 </div>
 
-<div class="row g-3 mb-4">
-    <div class="col-12 col-md-6 col-xl-3">
-        <div class="stat-card">
-            <div class="stat-icon-wrap bg-primary-soft"><i class="fas fa-book"></i></div>
+<div class="admin-card knowledge-overview-card mb-4">
+    <div class="admin-card-body">
+        <div class="knowledge-overview-head">
             <div>
-                <div class="stat-number">{{ number_format($stats['total']) }}</div>
-                <div class="stat-label">{{ __('messages.total') }} {{ __('messages.knowledge_base') }}</div>
+                <div class="knowledge-eyebrow">{{ __('messages.library_overview') }}</div>
+                <h3 class="knowledge-overview-title">{{ __('messages.knowledge_base') }}</h3>
+                <p class="knowledge-overview-copy">{{ __('messages.simplified_batch_hint') }}</p>
+            </div>
+            <div class="knowledge-overview-badges">
+                <span class="knowledge-pill knowledge-pill-primary">
+                    <i class="fas fa-database"></i>{{ __('messages.index_engine') }}: {{ $vectorIndex['label'] }}
+                </span>
+                <span class="knowledge-pill knowledge-pill-success">
+                    <i class="fas fa-scissors"></i>{{ __('messages.semantic_chunking') }}
+                </span>
             </div>
         </div>
-    </div>
-    <div class="col-12 col-md-6 col-xl-3">
-        <div class="stat-card">
-            <div class="stat-icon-wrap bg-purple-soft"><i class="fas fa-inbox"></i></div>
-            <div>
-                <div class="stat-number">{{ number_format($stats['uploaded']) }}</div>
-                <div class="stat-label">{{ __('messages.ready_to_upload') }}</div>
+        <div class="knowledge-library-stats">
+            <div class="knowledge-library-stat">
+                <span>{{ __('messages.total') }}</span>
+                <strong>{{ number_format($stats['total']) }}</strong>
+            </div>
+            <div class="knowledge-library-stat">
+                <span>{{ __('messages.uploaded') }}</span>
+                <strong>{{ number_format($stats['uploaded']) }}</strong>
+            </div>
+            <div class="knowledge-library-stat">
+                <span>{{ __('messages.processing') }}</span>
+                <strong>{{ number_format($stats['processing']) }}</strong>
+            </div>
+            <div class="knowledge-library-stat">
+                <span>{{ __('messages.indexed_documents') }}</span>
+                <strong>{{ number_format($stats['processed']) }}</strong>
             </div>
         </div>
-    </div>
-    <div class="col-12 col-md-6 col-xl-3">
-        <div class="stat-card">
-            <div class="stat-icon-wrap bg-info-soft"><i class="fas fa-gears"></i></div>
-            <div>
-                <div class="stat-number">{{ number_format($stats['processing']) }}</div>
-                <div class="stat-label">{{ __('messages.processing') }}</div>
-            </div>
-        </div>
-    </div>
-    <div class="col-12 col-md-6 col-xl-3">
-        <div class="stat-card">
-            <div class="stat-icon-wrap bg-success-soft"><i class="fas fa-check-double"></i></div>
-            <div>
-                <div class="stat-number">{{ number_format($stats['processed']) }}</div>
-                <div class="stat-label">{{ __('messages.indexed_documents') }}</div>
-            </div>
+        <div class="knowledge-engine-note">
+            {{ $vectorIndex['driver'] === 'qdrant' ? __('messages.qdrant_active') : __('messages.local_fallback_active') }}
         </div>
     </div>
 </div>
@@ -66,115 +68,136 @@
         <div>
             <h3 class="admin-card-title"><i class="fas fa-layer-group"></i> {{ __('messages.batch_uploader') }}</h3>
             <div class="knowledge-batch-subtitle">{{ __('messages.batch_uploader_hint') }}</div>
-            <div class="knowledge-pill-list">
-                <span class="knowledge-pill knowledge-pill-{{ $vectorIndex['driver'] === 'qdrant' ? 'primary' : 'warning' }}">
-                    <i class="fas fa-database"></i>{{ __('messages.index_engine') }}: {{ $vectorIndex['label'] }}
-                </span>
-                <span class="knowledge-pill knowledge-pill-primary">
-                    <i class="fas fa-shuffle"></i>{{ __('messages.one_by_one_pipeline') }}
-                </span>
-                <span class="knowledge-pill knowledge-pill-success">
-                    <i class="fas fa-scissors"></i>{{ __('messages.semantic_chunking') }}
-                </span>
-            </div>
-            <div class="knowledge-engine-note">
-                {{ $vectorIndex['driver'] === 'qdrant' ? __('messages.qdrant_active') : __('messages.local_fallback_active') }}
-            </div>
         </div>
         <span class="badge bg-secondary" id="knowledgeBatchSelectedCount">0 {{ __('messages.total') }}</span>
     </div>
     <div class="admin-card-body">
         <div class="knowledge-batch-layout">
-            <div class="knowledge-batch-panel">
-                <div class="knowledge-dropzone" id="knowledgeDropzone" tabindex="0" role="button" aria-label="{{ __('messages.select_files') }}">
-                    <input type="file" id="knowledgeFiles" class="d-none" accept=".pdf,.doc,.docx,.pptx,.txt" multiple>
-                    <div class="knowledge-dropzone-icon"><i class="fas fa-cloud-arrow-up"></i></div>
-                    <h4>{{ __('messages.drag_drop_knowledge') }}</h4>
-                    <p>{{ __('messages.upload_one_by_one_hint') }}</p>
-                    <button type="button" class="btn btn-primary btn-sm" id="selectKnowledgeFilesBtn">
-                        <i class="fas fa-folder-open me-1"></i>{{ __('messages.select_files') }}
-                    </button>
-                    <div class="knowledge-dropzone-note">
-                        PDF, DOC, DOCX, PPTX, TXT · {{ $maxUploadMb }}MB max / file
+            <div class="knowledge-batch-main">
+                <div class="knowledge-step-card">
+                    <div class="knowledge-step-head">
+                        <span class="knowledge-step-number">1</span>
+                        <div>
+                            <h4>{{ __('messages.step_select_files') }}</h4>
+                            <p>{{ __('messages.step_select_files_hint') }}</p>
+                        </div>
+                    </div>
+                    <div class="knowledge-dropzone" id="knowledgeDropzone" tabindex="0" role="button" aria-label="{{ __('messages.select_files') }}">
+                        <input type="file" id="knowledgeFiles" class="d-none" accept=".pdf,.doc,.docx,.pptx,.txt" multiple>
+                        <div class="knowledge-dropzone-icon"><i class="fas fa-cloud-arrow-up"></i></div>
+                        <h4>{{ __('messages.drag_drop_knowledge') }}</h4>
+                        <p>{{ __('messages.upload_one_by_one_hint') }}</p>
+                        <button type="button" class="btn btn-primary btn-sm" id="selectKnowledgeFilesBtn">
+                            <i class="fas fa-folder-open me-1"></i>{{ __('messages.select_files') }}
+                        </button>
+                        <div class="knowledge-dropzone-note">
+                            PDF, DOC, DOCX, PPTX, TXT · {{ $maxUploadMb }}MB max / file
+                        </div>
                     </div>
                 </div>
 
-                <div class="knowledge-batch-fields">
-                    <div>
-                        <label class="form-label">{{ __('messages.document_category') }}</label>
-                        <input type="text" class="form-control" id="knowledgeBatchCategory" placeholder="civil_law, procedure, general...">
-                        <div class="knowledge-field-help">{{ __('messages.batch_category_hint') }}</div>
+                <div class="knowledge-step-card">
+                    <div class="knowledge-step-head">
+                        <span class="knowledge-step-number">2</span>
+                        <div>
+                            <h4>{{ __('messages.step_set_category') }}</h4>
+                            <p>{{ __('messages.step_set_category_hint') }}</p>
+                        </div>
                     </div>
-                    <div class="knowledge-field-help knowledge-field-help-inline">
-                        <i class="fas fa-wand-magic-sparkles"></i>
-                        <span>{{ __('messages.auto_titles_from_filename') }}</span>
-                    </div>
-                    <div class="knowledge-field-help knowledge-field-help-inline">
-                        <i class="fas fa-brain"></i>
-                        <span>{{ __('messages.semantic_chunking_hint') }}</span>
+                    <div class="knowledge-batch-fields">
+                        <div>
+                            <label class="form-label">{{ __('messages.document_category') }}</label>
+                            <input type="text" class="form-control" id="knowledgeBatchCategory" placeholder="civil_law, procedure, general...">
+                            <div class="knowledge-field-help">{{ __('messages.batch_category_hint') }}</div>
+                        </div>
+                        <div class="knowledge-field-help knowledge-field-help-inline">
+                            <i class="fas fa-wand-magic-sparkles"></i>
+                            <span>{{ __('messages.auto_titles_from_filename') }}</span>
+                        </div>
                     </div>
                 </div>
 
-                <div class="knowledge-batch-actions">
-                    <button type="button" class="btn btn-primary btn-sm" id="startKnowledgeBatch" disabled>
-                        <i class="fas fa-play me-1"></i>{{ __('messages.start_batch_upload') }}
-                    </button>
-                    <button type="button" class="btn btn-outline-secondary btn-sm" id="clearKnowledgeBatch" disabled>
-                        <i class="fas fa-broom me-1"></i>{{ __('messages.clear_finished') }}
-                    </button>
-                </div>
-            </div>
-
-            <div class="knowledge-batch-panel knowledge-batch-summary-panel">
-                <div class="knowledge-progress-card">
-                    <div class="knowledge-progress-header">
-                        <span>{{ __('messages.batch_progress') }}</span>
-                        <span id="knowledgeBatchActivity">0 / 0</span>
+                <div class="knowledge-step-card">
+                    <div class="knowledge-step-head">
+                        <span class="knowledge-step-number">3</span>
+                        <div>
+                            <h4>{{ __('messages.step_start_indexing') }}</h4>
+                            <p>{{ __('messages.step_start_indexing_hint') }}</p>
+                        </div>
                     </div>
-                    <div class="knowledge-progress-bar">
-                        <span id="knowledgeBatchProgressBar"></span>
+                    <div class="knowledge-start-panel">
+                        <div class="knowledge-field-help knowledge-field-help-inline">
+                            <i class="fas fa-shuffle"></i>
+                            <span>{{ __('messages.one_by_one_pipeline') }}</span>
+                        </div>
+                        <div class="knowledge-field-help knowledge-field-help-inline">
+                            <i class="fas fa-brain"></i>
+                            <span>{{ __('messages.semantic_chunking_hint') }}</span>
+                        </div>
                     </div>
-                    <div class="knowledge-progress-note" id="knowledgeBatchProgressNote">{{ __('messages.no_files_selected') }}</div>
-                </div>
-
-                <div class="knowledge-summary-grid">
-                    <div class="knowledge-summary-tile">
-                        <span class="knowledge-summary-label">{{ __('messages.total') }}</span>
-                        <strong id="summaryTotal">0</strong>
-                    </div>
-                    <div class="knowledge-summary-tile">
-                        <span class="knowledge-summary-label">{{ __('messages.ready_to_upload') }}</span>
-                        <strong id="summaryWaiting">0</strong>
-                    </div>
-                    <div class="knowledge-summary-tile">
-                        <span class="knowledge-summary-label">{{ __('messages.queued_for_indexing') }}</span>
-                        <strong id="summaryQueued">0</strong>
-                    </div>
-                    <div class="knowledge-summary-tile">
-                        <span class="knowledge-summary-label">{{ __('messages.processing') }}</span>
-                        <strong id="summaryProcessing">0</strong>
-                    </div>
-                    <div class="knowledge-summary-tile">
-                        <span class="knowledge-summary-label">{{ __('messages.indexed_documents') }}</span>
-                        <strong id="summaryProcessed">0</strong>
-                    </div>
-                    <div class="knowledge-summary-tile">
-                        <span class="knowledge-summary-label">{{ __('messages.issues') }}</span>
-                        <strong id="summaryFailed">0</strong>
+                    <div class="knowledge-batch-actions">
+                        <button type="button" class="btn btn-primary btn-sm" id="startKnowledgeBatch" disabled>
+                            <i class="fas fa-play me-1"></i>{{ __('messages.start_batch_upload') }}
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary btn-sm" id="clearKnowledgeBatch" disabled>
+                            <i class="fas fa-broom me-1"></i>{{ __('messages.clear_finished') }}
+                        </button>
                     </div>
                 </div>
             </div>
-        </div>
 
-        <div class="knowledge-queue-wrap">
-            <div class="knowledge-queue-header">
-                <h4>{{ __('messages.upload_queue') }}</h4>
-                <span class="text-muted-sm">{{ __('messages.upload_one_by_one_hint') }}</span>
-            </div>
-            <div class="knowledge-queue-list" id="knowledgeBatchList">
-                <div class="knowledge-queue-empty">
-                    <i class="fas fa-file-circle-plus"></i>
-                    <p>{{ __('messages.no_files_selected') }}</p>
+            <div class="knowledge-batch-sidebar">
+                <div class="knowledge-batch-panel">
+                    <div class="knowledge-progress-card">
+                        <div class="knowledge-progress-header">
+                            <span>{{ __('messages.batch_progress') }}</span>
+                            <span id="knowledgeBatchActivity">0 / 0</span>
+                        </div>
+                        <div class="knowledge-progress-bar">
+                            <span id="knowledgeBatchProgressBar"></span>
+                        </div>
+                        <div class="knowledge-progress-note" id="knowledgeBatchProgressNote">{{ __('messages.no_files_selected') }}</div>
+                    </div>
+
+                    <div class="knowledge-simple-stats">
+                        <div class="knowledge-simple-stat">
+                            <span>{{ __('messages.total') }}</span>
+                            <strong id="summaryTotal">0</strong>
+                        </div>
+                        <div class="knowledge-simple-stat">
+                            <span>{{ __('messages.ready_to_upload') }}</span>
+                            <strong id="summaryWaiting">0</strong>
+                        </div>
+                        <div class="knowledge-simple-stat">
+                            <span>{{ __('messages.queued_for_indexing') }}</span>
+                            <strong id="summaryQueued">0</strong>
+                        </div>
+                        <div class="knowledge-simple-stat">
+                            <span>{{ __('messages.processing') }}</span>
+                            <strong id="summaryProcessing">0</strong>
+                        </div>
+                        <div class="knowledge-simple-stat">
+                            <span>{{ __('messages.indexed_documents') }}</span>
+                            <strong id="summaryProcessed">0</strong>
+                        </div>
+                        <div class="knowledge-simple-stat">
+                            <span>{{ __('messages.issues') }}</span>
+                            <strong id="summaryFailed">0</strong>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="knowledge-batch-panel">
+                    <div class="knowledge-queue-header">
+                        <h4>{{ __('messages.selected_batch_files') }}</h4>
+                        <span class="text-muted-sm">{{ __('messages.batch_queue_hint') }}</span>
+                    </div>
+                    <div class="knowledge-queue-list" id="knowledgeBatchList">
+                        <div class="knowledge-queue-empty">
+                            <i class="fas fa-file-circle-plus"></i>
+                            <p>{{ __('messages.no_files_selected') }}</p>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>

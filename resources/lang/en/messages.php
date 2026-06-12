@@ -175,6 +175,16 @@ return [
     'local_fallback_active' => 'Qdrant is unavailable, so indexing is using the local database fallback.',
     'qdrant_active'     => 'Qdrant is connected and indexing is running through the vector server.',
     'semantic_chunking_hint' => 'Documents are split by structure and sentence flow for cleaner retrieval.',
+    'library_overview'   => 'Library Overview',
+    'simplified_batch_hint' => 'Select files, add one optional category, and start. Each file uploads and processes in order so the screen stays easy to follow.',
+    'step_select_files'  => 'Select Files',
+    'step_select_files_hint' => 'Choose the documents you want to add to the knowledge base.',
+    'step_set_category'  => 'Set Category',
+    'step_set_category_hint' => 'Optional. Use one category for the whole batch if it helps your team stay organized.',
+    'step_start_indexing' => 'Start Processing',
+    'step_start_indexing_hint' => 'The page uploads each file, processes it, and then moves to the next file automatically.',
+    'selected_batch_files' => 'Selected Files',
+    'batch_queue_hint'   => 'Simple live status for every file.',
 
     // ── AI Tools ──────────────────────────────────────────────────────────
     'tool_type'         => 'Tool',
