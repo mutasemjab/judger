@@ -10,7 +10,9 @@ return [
     'embedding_batch_size' => (int) env('AI_EMBEDDING_BATCH_SIZE', 12),
     'embedding_connect_timeout' => (int) env('AI_EMBEDDING_CONNECT_TIMEOUT', 15),
     'embedding_request_timeout' => (int) env('AI_EMBEDDING_REQUEST_TIMEOUT', 45),
+    'document_extraction_command_timeout' => (int) env('AI_DOCUMENT_EXTRACTION_COMMAND_TIMEOUT', 90),
     'knowledge_processing_step_chunk_count' => (int) env('AI_KNOWLEDGE_STEP_CHUNK_COUNT', 4),
+    'knowledge_processing_stale_minutes' => (int) env('AI_KNOWLEDGE_PROCESSING_STALE_MINUTES', 30),
     'vector_store' => env('AI_VECTOR_STORE', 'auto'),
 
     'document_similarity_threshold' => (float) env('AI_DOCUMENT_SIMILARITY_THRESHOLD', 0.70),

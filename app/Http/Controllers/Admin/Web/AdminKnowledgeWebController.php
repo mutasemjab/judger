@@ -23,8 +23,8 @@ class AdminKnowledgeWebController extends Controller
         $this->recoverStaleProcessingDocuments();
 
         $documents = KnowledgeDocument::with('uploadedBy')
-            ->when($request->status, fn($q, $v) => $q->where('status', $v))
-            ->when($request->category, fn($q, $v) => $q->where('category', $v))
+            ->when($request->status, fn ($q, $v) => $q->where('status', $v))
+            ->when($request->category, fn ($q, $v) => $q->where('category', $v))
             ->latest()
             ->paginate(20);
 
@@ -51,26 +51,26 @@ class AdminKnowledgeWebController extends Controller
         $isAsyncBatchRequest = $request->expectsJson() || $request->wantsJson() || $request->ajax();
 
         $request->validate([
-            'file'     => KnowledgeDocument::uploadRules(),
-            'title'    => 'nullable|string|max:255',
+            'file' => KnowledgeDocument::uploadRules(),
+            'title' => 'nullable|string|max:255',
             'category' => 'nullable|string|max:100',
             'process_now' => 'nullable|boolean',
         ]);
 
-        $file     = $request->file('file');
+        $file = $request->file('file');
         $fileName = Str::uuid().'.'.$file->getClientOriginalExtension();
-        $path     = $file->storeAs('knowledge_documents', $fileName);
+        $path = $file->storeAs('knowledge_documents', $fileName);
 
         $document = KnowledgeDocument::create([
-            'title'         => KnowledgeDocument::normalizeTitle($request->title, $file->getClientOriginalName()),
+            'title' => KnowledgeDocument::normalizeTitle($request->title, $file->getClientOriginalName()),
             'original_name' => $file->getClientOriginalName(),
-            'file_name'     => $fileName,
-            'file_path'     => $path,
-            'disk'          => 'local',
-            'mime_type'     => $file->getMimeType(),
-            'file_size'     => $file->getSize(),
-            'category'      => $request->category,
-            'uploaded_by'   => Auth::guard('admin_web')->id(),
+            'file_name' => $fileName,
+            'file_path' => $path,
+            'disk' => 'local',
+            'mime_type' => $file->getMimeType(),
+            'file_size' => $file->getSize(),
+            'category' => $request->category,
+            'uploaded_by' => Auth::guard('admin_web')->id(),
         ]);
 
         if ($request->boolean('process_now')) {
@@ -249,6 +249,10 @@ class AdminKnowledgeWebController extends Controller
 
         $this->releaseSessionLock($request);
 
+        if ($this->shouldUseJson($request)) {
+            return app(KnowledgeDocumentStepProcessor::class)->processNextStep($knowledgeDocument, $forceRestart);
+        }
+
         return app(KnowledgeDocumentBackgroundLauncher::class)->start($knowledgeDocument, $forceRestart);
     }
 
@@ -266,7 +270,8 @@ class AdminKnowledgeWebController extends Controller
 
     private function recoverStaleProcessingDocuments(): void
     {
-        $staleBefore = now()->subMinutes(15);
+        $staleMinutes = max(5, (int) config('ai.knowledge_processing_stale_minutes', 30));
+        $staleBefore = now()->subMinutes($staleMinutes);
 
         $documents = KnowledgeDocument::query()
             ->where('status', KnowledgeDocumentStatus::Processing->value)

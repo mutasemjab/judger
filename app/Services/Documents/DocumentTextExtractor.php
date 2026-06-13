@@ -4,10 +4,12 @@ namespace App\Services\Documents;
 
 use DOMDocument;
 use DOMXPath;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use RuntimeException;
 use Smalot\PdfParser\Parser;
+use Symfony\Component\Process\Exception\ProcessTimedOutException;
+use Symfony\Component\Process\Process;
 use Throwable;
 use ZipArchive;
 
@@ -57,9 +59,9 @@ class DocumentTextExtractor
     private function extractPdf(string $path): array
     {
         $strategies = [
-            'pdf_parser' => fn (): array => $this->extractPdfWithParser($path),
             'pdftotext' => fn (): array => $this->extractPdfWithPdftotext($path),
             'ghostscript_txtwrite' => fn (): array => $this->extractPdfWithGhostscriptText($path),
+            'pdf_parser' => fn (): array => $this->extractPdfWithParser($path),
             'ocr_fallback' => fn (): array => $this->extractPdfWithOcr($path),
         ];
 
@@ -274,7 +276,7 @@ class DocumentTextExtractor
         return trim($text);
     }
 
-    private function extractPdfWithParser(string $path): array
+    protected function extractPdfWithParser(string $path): array
     {
         $parser = new Parser();
         $pdf = $parser->parseFile($path);
@@ -305,7 +307,7 @@ class DocumentTextExtractor
         return $result;
     }
 
-    private function extractPdfWithPdftotext(string $path): array
+    protected function extractPdfWithPdftotext(string $path): array
     {
         if (! $this->commandExists('pdftotext')) {
             return [];
@@ -336,14 +338,14 @@ class DocumentTextExtractor
         }
     }
 
-    private function extractPdfWithGhostscriptText(string $path): array
+    protected function extractPdfWithGhostscriptText(string $path): array
     {
         if (! $this->commandExists('gs')) {
             return [];
         }
 
         $tempDir = $this->makeTempDirectory('kb-gs-text-');
-        $outputPattern = $tempDir . DIRECTORY_SEPARATOR . 'page-%03d.txt';
+        $outputPattern = $tempDir.DIRECTORY_SEPARATOR.'page-%03d.txt';
 
         try {
             $this->runCommand([
@@ -353,7 +355,7 @@ class DocumentTextExtractor
                 '-dBATCH',
                 '-dNOPAUSE',
                 '-sDEVICE=txtwrite',
-                '-sOutputFile=' . $outputPattern,
+                '-sOutputFile='.$outputPattern,
                 $path,
             ]);
 
@@ -363,7 +365,7 @@ class DocumentTextExtractor
         }
     }
 
-    private function extractPdfWithOcr(string $path): array
+    protected function extractPdfWithOcr(string $path): array
     {
         if (! $this->commandExists('gs') || ! $this->commandExists('tesseract')) {
             return [];
@@ -376,7 +378,7 @@ class DocumentTextExtractor
         }
 
         $tempDir = $this->makeTempDirectory('kb-ocr-');
-        $imagePattern = $tempDir . DIRECTORY_SEPARATOR . 'page-%03d.png';
+        $imagePattern = $tempDir.DIRECTORY_SEPARATOR.'page-%03d.png';
 
         try {
             $this->runCommand([
@@ -387,11 +389,11 @@ class DocumentTextExtractor
                 '-dNOPAUSE',
                 '-sDEVICE=png16m',
                 '-r180',
-                '-sOutputFile=' . $imagePattern,
+                '-sOutputFile='.$imagePattern,
                 $path,
             ]);
 
-            $images = glob($tempDir . DIRECTORY_SEPARATOR . 'page-*.png') ?: [];
+            $images = glob($tempDir.DIRECTORY_SEPARATOR.'page-*.png') ?: [];
             sort($images);
 
             $pages = [];
@@ -448,7 +450,7 @@ class DocumentTextExtractor
 
     private function pagesFromGeneratedFiles(string $directory, string $pattern): array
     {
-        $files = glob($directory . DIRECTORY_SEPARATOR . $pattern) ?: [];
+        $files = glob($directory.DIRECTORY_SEPARATOR.$pattern) ?: [];
         sort($files);
 
         $pages = [];
@@ -523,7 +525,7 @@ class DocumentTextExtractor
         return $language ?: null;
     }
 
-    private function commandExists(string $command): bool
+    protected function commandExists(string $command): bool
     {
         static $cache = [];
 
@@ -531,52 +533,48 @@ class DocumentTextExtractor
             return $cache[$command];
         }
 
-        $result = $this->runCommand(['sh', '-lc', 'command -v ' . escapeshellarg($command)], throwOnFailure: false);
+        $result = $this->runCommand(['sh', '-lc', 'command -v '.escapeshellarg($command)], throwOnFailure: false);
 
         return $cache[$command] = is_string($result) && trim($result) !== '';
     }
 
-    private function runCommand(array $command, bool $throwOnFailure = true): ?string
+    protected function runCommand(array $command, bool $throwOnFailure = true): ?string
     {
-        if (! function_exists('proc_open')) {
+        if (! class_exists(Process::class) || ! function_exists('proc_open')) {
             return null;
         }
 
         $escapedCommand = implode(' ', array_map('escapeshellarg', $command));
-        $descriptorSpec = [
-            1 => ['pipe', 'w'],
-            2 => ['pipe', 'w'],
-        ];
+        $timeout = max(5, (int) config('ai.document_extraction_command_timeout', 90));
+        $process = new Process($command, null, null, null, $timeout);
 
-        $process = @proc_open($escapedCommand, $descriptorSpec, $pipes);
+        try {
+            $process->run();
+        } catch (ProcessTimedOutException $exception) {
+            if ($throwOnFailure) {
+                throw new RuntimeException('Command timed out: '.$escapedCommand, previous: $exception);
+            }
 
-        if (! is_resource($process)) {
             return null;
         }
 
-        $stdout = stream_get_contents($pipes[1]) ?: '';
-        fclose($pipes[1]);
+        if (! $process->isSuccessful()) {
+            if ($throwOnFailure) {
+                $stderr = trim($process->getErrorOutput());
 
-        $stderr = stream_get_contents($pipes[2]) ?: '';
-        fclose($pipes[2]);
+                throw new RuntimeException($stderr !== '' ? $stderr : ('Command failed: '.$escapedCommand));
+            }
 
-        $exitCode = proc_close($process);
-
-        if ($exitCode !== 0 && $throwOnFailure) {
-            throw new RuntimeException(trim($stderr) !== '' ? trim($stderr) : ('Command failed: ' . $escapedCommand));
-        }
-
-        if ($exitCode !== 0) {
             return null;
         }
 
-        return $stdout;
+        return $process->getOutput();
     }
 
     private function makeTempDirectory(string $prefix): string
     {
         $base = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR);
-        $directory = $base . DIRECTORY_SEPARATOR . $prefix . bin2hex(random_bytes(8));
+        $directory = $base.DIRECTORY_SEPARATOR.$prefix.bin2hex(random_bytes(8));
 
         if (! @mkdir($directory, 0777, true) && ! is_dir($directory)) {
             throw new RuntimeException('Unable to create temporary directory for document extraction.');
@@ -598,7 +596,7 @@ class DocumentTextExtractor
                 continue;
             }
 
-            $path = $directory . DIRECTORY_SEPARATOR . $item;
+            $path = $directory.DIRECTORY_SEPARATOR.$item;
 
             if (is_dir($path)) {
                 $this->deleteDirectory($path);
