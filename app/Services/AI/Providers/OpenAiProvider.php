@@ -4,7 +4,9 @@ namespace App\Services\AI\Providers;
 
 use App\Services\AI\Contracts\LlmProviderInterface;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
+use Throwable;
 
 class OpenAiProvider implements LlmProviderInterface
 {
@@ -79,15 +81,48 @@ class OpenAiProvider implements LlmProviderInterface
         // bypass the transfer timeout and hang the process indefinitely.
         $connectTimeout = (int) config('ai.embedding_connect_timeout', 15);
         $transferTimeout = (int) config('ai.embedding_request_timeout', 45);
+        $startedAt = microtime(true);
 
-        $response = Http::withToken($this->apiKey)
-            ->connectTimeout($connectTimeout)
-            ->timeout($transferTimeout)
-            ->retry(1, 500)   // one retry only — fast failure is better than 3× hang
-            ->post('https://api.openai.com/v1/embeddings', [
+        Log::info('ai.embedding.request_started', [
+            'provider' => 'openai',
+            'model' => $this->embeddingModel,
+            'inputs_count' => count($inputs),
+            'characters_total' => array_sum(array_map('mb_strlen', $inputs)),
+            'connect_timeout_seconds' => $connectTimeout,
+            'request_timeout_seconds' => $transferTimeout,
+        ]);
+
+        try {
+            $response = Http::withToken($this->apiKey)
+                ->connectTimeout($connectTimeout)
+                ->timeout($transferTimeout)
+                ->retry(1, 500)   // one retry only - fast failure is better than 3x hang
+                ->post('https://api.openai.com/v1/embeddings', [
+                    'model' => $this->embeddingModel,
+                    'input' => $inputs,
+                ]);
+        } catch (Throwable $exception) {
+            Log::error('ai.embedding.request_exception', [
+                'provider' => 'openai',
                 'model' => $this->embeddingModel,
-                'input' => $inputs,
+                'inputs_count' => count($inputs),
+                'duration_ms' => (int) round((microtime(true) - $startedAt) * 1000),
+                'exception' => $exception::class,
+                'message' => $exception->getMessage(),
             ]);
+
+            throw $exception;
+        }
+
+        $durationMs = (int) round((microtime(true) - $startedAt) * 1000);
+
+        Log::info('ai.embedding.request_completed', [
+            'provider' => 'openai',
+            'model' => $this->embeddingModel,
+            'inputs_count' => count($inputs),
+            'duration_ms' => $durationMs,
+            'http_status' => $response->status(),
+        ]);
 
         if ($response->failed()) {
             $body = mb_substr((string) $response->body(), 0, 500);

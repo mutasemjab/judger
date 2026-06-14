@@ -12,7 +12,7 @@ class CaseDocumentSearchService
         $limit = $limit ?? config('ai.max_case_document_chunks', 8);
         $threshold = config('ai.document_similarity_threshold', 0.70);
 
-        $provider = AiProviderManager::resolve();
+        $provider = AiProviderManager::resolveEmbedding();
         $embedding = $provider->embedding($question);
 
         $vectorStore = app(VectorStoreInterface::class);

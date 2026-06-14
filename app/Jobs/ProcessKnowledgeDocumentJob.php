@@ -130,7 +130,7 @@ class ProcessKnowledgeDocumentJob implements ShouldQueue
             'total_chunks_count' => count($chunks),
         ]);
 
-        $provider = AiProviderManager::resolve();
+        $provider = AiProviderManager::resolveEmbedding();
         $pointsCount = 0;
         $batchSize = max(1, (int) config('ai.embedding_batch_size', 12));
         $chunkBatches = array_chunk($chunks, $batchSize);

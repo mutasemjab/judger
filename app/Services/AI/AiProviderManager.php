@@ -15,8 +15,23 @@ class AiProviderManager
             return app(LlmProviderInterface::class);
         }
 
-        $provider = config('ai.provider', 'mock');
+        return self::makeProvider((string) config('ai.provider', 'mock'));
+    }
 
+    public static function resolveEmbedding(): LlmProviderInterface
+    {
+        $defaultProvider = (string) config('ai.provider', 'mock');
+        $embeddingProvider = (string) (config('ai.embedding_provider') ?: $defaultProvider);
+
+        if ($embeddingProvider === $defaultProvider && app()->bound(LlmProviderInterface::class)) {
+            return app(LlmProviderInterface::class);
+        }
+
+        return self::makeProvider($embeddingProvider);
+    }
+
+    private static function makeProvider(string $provider): LlmProviderInterface
+    {
         return match ($provider) {
             'openai' => new OpenAiProvider(),
             'mock' => new MockLlmProvider(),

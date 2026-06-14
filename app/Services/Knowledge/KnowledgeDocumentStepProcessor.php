@@ -8,6 +8,7 @@ use App\Services\AI\AiProviderManager;
 use App\Services\Documents\DocumentTextExtractor;
 use App\Services\Documents\TextChunker;
 use App\Services\Vector\Contracts\VectorStoreInterface;
+use App\Services\Vector\VectorStoreManager;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -21,9 +22,45 @@ class KnowledgeDocumentStepProcessor
         ignore_user_abort(true);
         @set_time_limit(0);
 
+        $stepStartedAt = microtime(true);
+        $stepCompleted = false;
+        $phase = 'booting';
+        $batchOffset = null;
+        $batchSize = null;
+
+        register_shutdown_function(function () use (
+            $document,
+            $forceRestart,
+            $stepStartedAt,
+            &$stepCompleted,
+            &$phase,
+            &$batchOffset,
+            &$batchSize
+        ): void {
+            if ($stepCompleted) {
+                return;
+            }
+
+            $error = error_get_last();
+
+            Log::critical('knowledge.processing.step_terminated', [
+                'document_id' => $document->id,
+                'force_restart' => $forceRestart,
+                'phase' => $phase,
+                'batch_offset' => $batchOffset,
+                'batch_size' => $batchSize,
+                'duration_ms' => (int) round((microtime(true) - $stepStartedAt) * 1000),
+                'connection_aborted' => connection_aborted(),
+                'memory_peak_bytes' => memory_get_peak_usage(true),
+                'fatal_error' => $error,
+            ]);
+        });
+
         $lock = Cache::lock($this->lockKey($document->id), 300);
 
         if (! $lock->get()) {
+            $stepCompleted = true;
+
             return KnowledgeDocument::with('uploadedBy')->findOrFail($document->id);
         }
 
@@ -41,6 +78,8 @@ class KnowledgeDocumentStepProcessor
             }
 
             if ($state === null) {
+                $phase = 'prepare_processing_state';
+
                 return $this->prepareProcessingState($document);
             }
 
@@ -73,48 +112,124 @@ class KnowledgeDocumentStepProcessor
 
             $stepSize = max(1, (int) config('ai.knowledge_processing_step_chunk_count', 4));
             $chunkBatch = array_slice($chunks, $processedCount, $stepSize);
+            $batchOffset = $processedCount;
+            $batchSize = count($chunkBatch);
+            $phase = 'resolve_embedding_provider';
+
+            $provider = AiProviderManager::resolveEmbedding();
+            $vectorStoreManager = app(VectorStoreManager::class);
+            $collectionName = $this->collectionName($document, $state);
 
             Log::info('knowledge.processing.embedding_batch_started', [
                 'document_id' => $document->id,
                 'batch_offset' => $processedCount,
                 'batch_size' => count($chunkBatch),
                 'total_chunks' => $totalChunks,
+                'provider_config' => config('ai.provider', 'mock'),
+                'embedding_provider_config' => config('ai.embedding_provider', config('ai.provider', 'mock')),
+                'resolved_provider' => $provider::class,
+                'embedding_model' => config('ai.embedding_model'),
+                'embedding_dimensions' => (int) config('ai.embedding_dimensions', 1536),
+                'embedding_connect_timeout' => (int) config('ai.embedding_connect_timeout', 15),
+                'embedding_request_timeout' => (int) config('ai.embedding_request_timeout', 45),
+                'vector_store_config' => config('ai.vector_store', 'auto'),
+                'vector_store_driver' => $vectorStoreManager->driver(),
+                'collection' => $collectionName,
             ]);
 
-            $provider = AiProviderManager::resolve();
-            $embeddings = $provider->embeddingMany(array_column($chunkBatch, 'content'));
+            $phase = 'embedding_request';
+            $embeddingStartedAt = microtime(true);
+            $inputs = array_column($chunkBatch, 'content');
+
+            try {
+                $embeddings = $provider->embeddingMany($inputs);
+            } catch (Throwable $exception) {
+                Log::error('knowledge.processing.embedding_request_failed', [
+                    'document_id' => $document->id,
+                    'batch_offset' => $processedCount,
+                    'batch_size' => count($chunkBatch),
+                    'duration_ms' => (int) round((microtime(true) - $embeddingStartedAt) * 1000),
+                    'exception' => $exception::class,
+                    'message' => $exception->getMessage(),
+                ]);
+
+                throw $exception;
+            }
+
+            Log::info('knowledge.processing.embedding_request_completed', [
+                'document_id' => $document->id,
+                'batch_offset' => $processedCount,
+                'batch_size' => count($chunkBatch),
+                'duration_ms' => (int) round((microtime(true) - $embeddingStartedAt) * 1000),
+                'embeddings_returned' => count($embeddings),
+            ]);
 
             if (count($embeddings) !== count($chunkBatch)) {
                 throw new RuntimeException('OpenAI returned an unexpected number of embeddings for this batch.');
             }
 
             $vectorStore = app(VectorStoreInterface::class);
-            $collectionName = $this->collectionName($document, $state);
+            $phase = 'vector_write';
+            $vectorStartedAt = microtime(true);
 
-            foreach ($chunkBatch as $offset => $chunk) {
-                $embedding = $embeddings[$offset] ?? [];
+            Log::info('knowledge.processing.vector_write_started', [
+                'document_id' => $document->id,
+                'batch_offset' => $processedCount,
+                'batch_size' => count($chunkBatch),
+                'vector_store_driver' => $vectorStoreManager->driver(),
+                'collection' => $collectionName,
+                'first_chunk_index' => $chunkBatch[0]['chunk_index'] ?? null,
+                'last_chunk_index' => $chunkBatch !== [] ? ($chunkBatch[array_key_last($chunkBatch)]['chunk_index'] ?? null) : null,
+            ]);
 
-                if (! is_array($embedding) || $embedding === []) {
-                    throw new RuntimeException('An embedding batch item was empty.');
+            try {
+                foreach ($chunkBatch as $offset => $chunk) {
+                    $embedding = $embeddings[$offset] ?? [];
+
+                    if (! is_array($embedding) || $embedding === []) {
+                        throw new RuntimeException('An embedding batch item was empty.');
+                    }
+
+                    $pointId = "kb_{$document->id}_{$chunk['chunk_index']}";
+
+                    $vectorStore->upsertPoint($collectionName, $pointId, $embedding, [
+                        'source_type' => 'knowledge_base',
+                        'knowledge_document_id' => $document->id,
+                        'document_name' => $document->original_name,
+                        'title' => $document->title,
+                        'category' => $document->category ?? 'general',
+                        'page_number' => $chunk['page_number'],
+                        'end_page_number' => $chunk['end_page_number'] ?? $chunk['page_number'],
+                        'chunk_index' => $chunk['chunk_index'],
+                        'content' => $chunk['content'],
+                        'snippet' => $chunk['snippet'],
+                        'word_count' => $chunk['word_count'] ?? null,
+                        'status' => 'processed',
+                    ]);
                 }
-
-                $pointId = "kb_{$document->id}_{$chunk['chunk_index']}";
-
-                $vectorStore->upsertPoint($collectionName, $pointId, $embedding, [
-                    'source_type' => 'knowledge_base',
-                    'knowledge_document_id' => $document->id,
-                    'document_name' => $document->original_name,
-                    'title' => $document->title,
-                    'category' => $document->category ?? 'general',
-                    'page_number' => $chunk['page_number'],
-                    'end_page_number' => $chunk['end_page_number'] ?? $chunk['page_number'],
-                    'chunk_index' => $chunk['chunk_index'],
-                    'content' => $chunk['content'],
-                    'snippet' => $chunk['snippet'],
-                    'word_count' => $chunk['word_count'] ?? null,
-                    'status' => 'processed',
+            } catch (Throwable $exception) {
+                Log::error('knowledge.processing.vector_write_failed', [
+                    'document_id' => $document->id,
+                    'batch_offset' => $processedCount,
+                    'batch_size' => count($chunkBatch),
+                    'duration_ms' => (int) round((microtime(true) - $vectorStartedAt) * 1000),
+                    'exception' => $exception::class,
+                    'message' => $exception->getMessage(),
+                    'collection' => $collectionName,
+                    'vector_store_driver' => $vectorStoreManager->driver(),
                 ]);
+
+                throw $exception;
             }
+
+            Log::info('knowledge.processing.vector_write_completed', [
+                'document_id' => $document->id,
+                'batch_offset' => $processedCount,
+                'batch_size' => count($chunkBatch),
+                'duration_ms' => (int) round((microtime(true) - $vectorStartedAt) * 1000),
+                'collection' => $collectionName,
+                'vector_store_driver' => $vectorStoreManager->driver(),
+            ]);
 
             $processedCount += count($chunkBatch);
 
@@ -145,10 +260,12 @@ class KnowledgeDocumentStepProcessor
 
             return KnowledgeDocument::with('uploadedBy')->findOrFail($document->id);
         } catch (Throwable $exception) {
+            $phase = 'mark_failed';
             $this->markAsFailed($document->id, $exception);
 
             return KnowledgeDocument::with('uploadedBy')->findOrFail($document->id);
         } finally {
+            $stepCompleted = true;
             $lock->release();
         }
     }

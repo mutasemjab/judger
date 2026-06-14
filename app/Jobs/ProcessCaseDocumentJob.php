@@ -50,7 +50,7 @@ class ProcessCaseDocumentJob implements ShouldQueue
         $chunker = app(TextChunker::class);
         $chunks = $chunker->chunk($pages);
 
-        $provider = AiProviderManager::resolve();
+        $provider = AiProviderManager::resolveEmbedding();
         $pointsCount = 0;
         $filteredChunks = array_values(array_filter($chunks, function (array $chunk): bool {
             return ! empty(trim((string) ($chunk['content'] ?? '')));
