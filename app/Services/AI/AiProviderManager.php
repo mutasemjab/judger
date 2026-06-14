@@ -11,10 +11,6 @@ class AiProviderManager
 {
     public static function resolve(): LlmProviderInterface
     {
-        if (app()->bound(LlmProviderInterface::class)) {
-            return app(LlmProviderInterface::class);
-        }
-
         return self::makeProvider((string) config('ai.provider', 'mock'));
     }
 
@@ -23,18 +19,14 @@ class AiProviderManager
         $defaultProvider = (string) config('ai.provider', 'mock');
         $embeddingProvider = (string) (config('ai.embedding_provider') ?: $defaultProvider);
 
-        if ($embeddingProvider === $defaultProvider && app()->bound(LlmProviderInterface::class)) {
-            return app(LlmProviderInterface::class);
-        }
-
         return self::makeProvider($embeddingProvider);
     }
 
     private static function makeProvider(string $provider): LlmProviderInterface
     {
         return match ($provider) {
-            'openai' => new OpenAiProvider(),
-            'mock' => new MockLlmProvider(),
+            'openai' => app(OpenAiProvider::class),
+            'mock' => app(MockLlmProvider::class),
             default => throw new InvalidArgumentException("Unsupported AI provider: {$provider}"),
         };
     }

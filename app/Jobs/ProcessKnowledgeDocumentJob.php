@@ -75,6 +75,9 @@ class ProcessKnowledgeDocumentJob implements ShouldQueue
 
     public function handle(): void
     {
+        ignore_user_abort(true);
+        @set_time_limit(0);
+
         $document = KnowledgeDocument::findOrFail($this->documentId);
         Log::info('knowledge.processing.started', [
             'document_id' => $document->id,

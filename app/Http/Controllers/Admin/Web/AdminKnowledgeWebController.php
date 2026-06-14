@@ -6,6 +6,8 @@ use App\Enums\KnowledgeDocumentStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\Api\V1\KnowledgeDocumentResource;
 use App\Models\KnowledgeDocument;
+use App\Services\AI\OpenAiConfigResolver;
+use App\Services\AI\OpenAiRuntimeConfigStore;
 use App\Services\Knowledge\KnowledgeDocumentBackgroundLauncher;
 use App\Services\Knowledge\KnowledgeDocumentStepProcessor;
 use App\Services\Vector\Contracts\VectorStoreInterface;
@@ -47,7 +49,44 @@ class AdminKnowledgeWebController extends Controller
             'label' => $vectorStore->label(),
         ];
 
-        return view('admin.knowledge.index', compact('documents', 'stats', 'vectorIndex'));
+        $openAiConfigResolver = app(OpenAiConfigResolver::class);
+        $runtimeConfigStore = app(OpenAiRuntimeConfigStore::class);
+        $aiConfig = [
+            'configured' => ! empty($openAiConfigResolver->apiKey()),
+            'source' => $openAiConfigResolver->apiKeySource(),
+            'stored' => $runtimeConfigStore->exists(),
+        ];
+
+        return view('admin.knowledge.index', compact('documents', 'stats', 'vectorIndex', 'aiConfig'));
+    }
+
+    public function updateAiConfig(Request $request, OpenAiRuntimeConfigStore $runtimeConfigStore): RedirectResponse
+    {
+        $data = $request->validate([
+            'openai_api_key' => 'required|string|max:500',
+            'openai_organization' => 'nullable|string|max:255',
+        ]);
+
+        try {
+            $runtimeConfigStore->save(
+                $data['openai_api_key'],
+                $data['openai_organization'] ?? null
+            );
+        } catch (Throwable) {
+            return back()
+                ->withInput()
+                ->withErrors([
+                    'openai_api_key' => app()->getLocale() === 'ar'
+                        ? 'تعذر حفظ مفتاح OpenAI على هذا الخادم. تحقق من صلاحيات الكتابة داخل storage.'
+                        : 'Could not save the OpenAI key on this server. Please check storage write permissions.',
+                ]);
+        }
+
+        return redirect()
+            ->route('admin.knowledge.index')
+            ->with('success', app()->getLocale() === 'ar'
+                ? 'تم حفظ إعدادات OpenAI لهذا الخادم. يمكنك إعادة المحاولة الآن.'
+                : 'OpenAI settings were saved for this server. You can retry processing now.');
     }
 
     public function store(Request $request)
@@ -348,10 +387,6 @@ class AdminKnowledgeWebController extends Controller
         }
 
         $this->releaseSessionLock($request);
-
-        if ($this->shouldUseJson($request)) {
-            return app(KnowledgeDocumentStepProcessor::class)->processNextStep($knowledgeDocument, $forceRestart);
-        }
 
         return app(KnowledgeDocumentBackgroundLauncher::class)->start($knowledgeDocument, $forceRestart);
     }

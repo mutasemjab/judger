@@ -2,6 +2,7 @@
 
 namespace App\Services\AI\Providers;
 
+use App\Services\AI\OpenAiConfigResolver;
 use App\Services\AI\Contracts\LlmProviderInterface;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -13,17 +14,22 @@ class OpenAiProvider implements LlmProviderInterface
     private string $apiKey;
     private string $chatModel;
     private string $embeddingModel;
+    private ?string $organization;
 
-    public function __construct()
+    public function __construct(private OpenAiConfigResolver $configResolver)
     {
-        $this->apiKey = config('ai.openai_api_key') ?? throw new RuntimeException('OpenAI API key is not configured.');
+        $this->apiKey = $this->configResolver->apiKey()
+            ?? throw new RuntimeException('OpenAI API key is not configured. Set OPENAI_API_KEY or save it from the knowledge admin screen.');
+
+        $this->configResolver->syncIntoRuntimeConfig();
         $this->chatModel = config('ai.chat_model', 'gpt-4o-mini');
         $this->embeddingModel = config('ai.embedding_model', 'text-embedding-3-small');
+        $this->organization = config('openai.organization');
     }
 
     public function chat(array $messages, array $options = []): string
     {
-        $response = Http::withToken($this->apiKey)
+        $response = $this->http()
             ->connectTimeout(15)
             ->timeout(60)
             ->post('https://api.openai.com/v1/chat/completions', array_merge([
@@ -42,7 +48,7 @@ class OpenAiProvider implements LlmProviderInterface
 
     public function chatJson(array $messages, array $schema = [], array $options = []): array
     {
-        $response = Http::withToken($this->apiKey)
+        $response = $this->http()
             ->connectTimeout(15)
             ->timeout(60)
             ->post('https://api.openai.com/v1/chat/completions', [
@@ -93,7 +99,7 @@ class OpenAiProvider implements LlmProviderInterface
         ]);
 
         try {
-            $response = Http::withToken($this->apiKey)
+            $response = $this->http()
                 ->connectTimeout($connectTimeout)
                 ->timeout($transferTimeout)
                 ->retry(1, 500)   // one retry only - fast failure is better than 3x hang
@@ -142,5 +148,18 @@ class OpenAiProvider implements LlmProviderInterface
             fn (array $item): array => is_array($item['embedding'] ?? null) ? $item['embedding'] : [],
             $data
         ));
+    }
+
+    private function http(): \Illuminate\Http\Client\PendingRequest
+    {
+        $request = Http::withToken($this->apiKey);
+
+        if (is_string($this->organization) && trim($this->organization) !== '') {
+            $request = $request->withHeaders([
+                'OpenAI-Organization' => $this->organization,
+            ]);
+        }
+
+        return $request;
     }
 }

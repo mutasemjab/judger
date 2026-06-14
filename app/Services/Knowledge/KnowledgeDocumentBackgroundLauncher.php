@@ -3,11 +3,11 @@
 namespace App\Services\Knowledge;
 
 use App\Enums\KnowledgeDocumentStatus;
+use App\Jobs\ProcessKnowledgeDocumentJob;
 use App\Models\KnowledgeDocument;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use RuntimeException;
-use Symfony\Component\Process\PhpExecutableFinder;
-use Symfony\Component\Process\Process;
 use Throwable;
 
 class KnowledgeDocumentBackgroundLauncher
@@ -28,12 +28,15 @@ class KnowledgeDocumentBackgroundLauncher
         ]);
 
         try {
-            $command = $this->buildBackgroundCommand($document->id, $forceRestart);
-            $this->launchInBackground($command);
+            Storage::disk('local')->delete("knowledge_processing/document_{$document->id}.json");
+            app()->terminating(function () use ($document): void {
+                ProcessKnowledgeDocumentJob::processNow($document->id);
+            });
 
             Log::info('knowledge.processing.background_started', [
                 'document_id' => $document->id,
                 'restart' => $forceRestart,
+                'mode' => 'terminating_callback',
             ]);
 
             return KnowledgeDocument::with('uploadedBy')->findOrFail($document->id);
@@ -57,77 +60,5 @@ class KnowledgeDocumentBackgroundLauncher
 
             throw new RuntimeException(__('messages.processing_launch_failed'));
         }
-    }
-
-    private function buildBackgroundCommand(int $documentId, bool $forceRestart): string
-    {
-        $phpBinary = $this->resolvePhpBinary();
-        $artisanPath = base_path('artisan');
-
-        if (! is_file($artisanPath)) {
-            throw new RuntimeException('Could not find the Artisan console file.');
-        }
-
-        $parts = [
-            escapeshellarg($phpBinary),
-            escapeshellarg($artisanPath),
-            'knowledge:process-document',
-            (string) $documentId,
-            '--no-interaction',
-        ];
-
-        if ($forceRestart) {
-            $parts[] = '--restart';
-        }
-
-        return sprintf(
-            'cd %s && nohup %s > /dev/null 2>&1 &',
-            escapeshellarg(base_path()),
-            implode(' ', $parts)
-        );
-    }
-
-    private function launchInBackground(string $command): void
-    {
-        if (function_exists('proc_open')) {
-            $process = Process::fromShellCommandline($command, base_path(), null, null, 10);
-            $process->run();
-
-            if (! $process->isSuccessful()) {
-                throw new RuntimeException(trim($process->getErrorOutput()) ?: 'Background process could not be started.');
-            }
-
-            return;
-        }
-
-        if (function_exists('exec')) {
-            $output = [];
-            $exitCode = 0;
-            @exec($command, $output, $exitCode);
-
-            if ($exitCode !== 0) {
-                throw new RuntimeException('Background process could not be started.');
-            }
-
-            return;
-        }
-
-        throw new RuntimeException('This server does not allow starting a background process.');
-    }
-
-    private function resolvePhpBinary(): string
-    {
-        $finder = new PhpExecutableFinder();
-        $phpBinary = $finder->find(false);
-
-        if (is_string($phpBinary) && $phpBinary !== '') {
-            return $phpBinary;
-        }
-
-        if (defined('PHP_BINARY') && is_string(PHP_BINARY) && PHP_BINARY !== '') {
-            return PHP_BINARY;
-        }
-
-        return 'php';
     }
 }
