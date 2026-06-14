@@ -3,8 +3,16 @@
 @section('page_title', __('messages.knowledge_base'))
 
 @php
+    $locale = app()->getLocale();
     $maxUploadMb = (int) ceil(\App\Models\KnowledgeDocument::MAX_UPLOAD_SIZE_KB / 1024);
     $issuesCount = ($stats['failed'] ?? 0) + ($stats['cancelled'] ?? 0);
+    $sourceLabel = match($aiConfig['source'] ?? null) {
+        'config' => $locale === 'ar' ? 'إعدادات التطبيق' : 'Application config',
+        'env_file' => '.env file',
+        'server_env' => $locale === 'ar' ? 'بيئة الخادم' : 'Server environment',
+        'runtime_file' => $locale === 'ar' ? 'ملف التشغيل المحلي' : 'Local runtime file',
+        default => $locale === 'ar' ? 'غير متوفر' : 'Not configured',
+    };
 @endphp
 
 @section('content')
@@ -234,6 +242,60 @@
     <button class="btn btn-primary btn-sm" type="button" id="openBatchUploader">
         <i class="fas fa-upload me-1"></i>{{ __('messages.upload_files') }}
     </button>
+</div>
+
+<div class="kb-upload-panel">
+    <div class="kb-upload-panel-header">
+        <h3><i class="fas fa-key"></i> {{ $locale === 'ar' ? 'إعدادات OpenAI للتضمين' : 'OpenAI Embedding Settings' }}</h3>
+        <div style="font-size:.78rem;color:#888;">
+            {{ !empty($aiConfig['configured'])
+                ? (($locale === 'ar' ? 'المصدر الحالي للمفتاح: ' : 'Current key source: ') . $sourceLabel)
+                : ($locale === 'ar'
+                    ? 'لن تنجح التضمينات حتى يتم توفير مفتاح OpenAI صالح.'
+                    : 'Embeddings will keep failing until a valid OpenAI key is available.') }}
+        </div>
+    </div>
+    <div class="p-3">
+        <form action="{{ route('admin.knowledge.openai-config') }}" method="POST" class="row g-2 align-items-end">
+            @csrf
+            <div class="col-lg-5">
+                <label for="openaiApiKey" class="form-label fw-semibold mb-1">
+                    {{ $locale === 'ar' ? 'مفتاح OpenAI API' : 'OpenAI API Key' }}
+                </label>
+                <input
+                    type="password"
+                    id="openaiApiKey"
+                    name="openai_api_key"
+                    class="form-control @error('openai_api_key') is-invalid @enderror"
+                    placeholder="sk-proj-..."
+                    autocomplete="off"
+                >
+                @error('openai_api_key')
+                    <div class="invalid-feedback">{{ $message }}</div>
+                @enderror
+            </div>
+            <div class="col-lg-4">
+                <label for="openaiOrganization" class="form-label fw-semibold mb-1">
+                    {{ $locale === 'ar' ? 'المؤسسة (اختياري)' : 'Organization (Optional)' }}
+                </label>
+                <input
+                    type="text"
+                    id="openaiOrganization"
+                    name="openai_organization"
+                    class="form-control @error('openai_organization') is-invalid @enderror"
+                    placeholder="{{ $locale === 'ar' ? 'اتركه فارغاً غالباً' : 'Usually leave this empty' }}"
+                >
+                @error('openai_organization')
+                    <div class="invalid-feedback">{{ $message }}</div>
+                @enderror
+            </div>
+            <div class="col-lg-3 d-grid">
+                <button type="submit" class="btn btn-outline-primary">
+                    <i class="fas fa-floppy-disk me-1"></i>{{ $locale === 'ar' ? 'حفظ المفتاح لهذا الخادم' : 'Save Key For This Server' }}
+                </button>
+            </div>
+        </form>
+    </div>
 </div>
 
 {{-- ── Upload Panel ─────────────────────────────────────────────── --}}
@@ -518,11 +580,6 @@
     const storeUrl = @json(route('admin.knowledge.store'));
     const statusesUrl = @json(route('admin.knowledge.statuses'));
     const processNowUrlTemplate = @json(route('admin.knowledge.process-now', ['knowledgeDocument' => '__ID__']));
-    // Step URL: called on every poll tick while a document is processing.
-    // Each call runs exactly one embedding batch (4 chunks by default).
-    // This drives processing via normal HTTP requests so no background/nohup
-    // process is needed — works reliably on shared hosting.
-    const stepUrlTemplate = @json(route('admin.knowledge.step', ['knowledgeDocument' => '__ID__']));
     const stopUrlTemplate = @json(route('admin.knowledge.stop', ['knowledgeDocument' => '__ID__']));
     const reprocessUrlTemplate = @json(route('admin.knowledge.reprocess', ['knowledgeDocument' => '__ID__']));
     const destroyUrlTemplate = @json(route('admin.knowledge.destroy', ['knowledgeDocument' => '__ID__']));
@@ -1007,31 +1064,11 @@
         if (!docData || docData.status !== 'processing') { return docData; }
         let latestDocData = docData;
 
-        // Drive processing step-by-step via HTTP instead of relying on a
-        // background process. Each iteration POSTs to /step, which runs one
-        // embedding batch (≈4 chunks) and returns the updated document.
-        // Works on shared hosting where nohup/CLI background processes are
-        // unreliable or get killed mid-run.
-        const stepUrl = stepUrlTemplate.replace('__ID__', String(documentId));
-
         while (!state.stopRequested) {
             await wait(1500);
 
-            const { response: stepResponse, payload: stepPayload } = await requestJson(stepUrl, {
-                method: 'POST',
-                headers: { 'Accept': 'application/json', 'X-CSRF-TOKEN': csrfToken, 'X-Requested-With': 'XMLHttpRequest' },
-            }).catch(function () { return { response: null, payload: null }; });
-
-            // Fall back to a plain status poll if the step request itself fails
-            // (e.g. network hiccup). This avoids stopping the loop on transient errors.
-            let currentDoc = stepResponse && stepResponse.ok
-                ? extractDocumentPayload(stepPayload)
-                : null;
-
-            if (!currentDoc) {
-                const fallback = await fetchStatusesByIds([documentId]);
-                currentDoc = Array.isArray(fallback) && fallback[0] ? fallback[0] : null;
-            }
+            const fallback = await fetchStatusesByIds([documentId]);
+            const currentDoc = Array.isArray(fallback) && fallback[0] ? fallback[0] : null;
 
             if (!currentDoc) { continue; }
 
