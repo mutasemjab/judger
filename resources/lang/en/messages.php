@@ -226,6 +226,7 @@ return [
     'document_already_processing' => 'This document is already processing.',
     'another_document_processing' => 'Another document is already processing right now: :title',
     'processing_timed_out' => 'Processing timed out. Please start this document again.',
+    'knowledge_reset_all_success' => 'Knowledge storage reset successfully. Removed :documents records, :uploads uploaded files, and :state processing state files.',
 
     // ── AI Tools ──────────────────────────────────────────────────────────
     'tool_type'         => 'Tool',

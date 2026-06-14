@@ -8,13 +8,17 @@ use App\Http\Resources\Api\V1\KnowledgeDocumentResource;
 use App\Models\KnowledgeDocument;
 use App\Services\Knowledge\KnowledgeDocumentBackgroundLauncher;
 use App\Services\Knowledge\KnowledgeDocumentStepProcessor;
+use App\Services\Vector\Contracts\VectorStoreInterface;
 use App\Services\Vector\VectorStoreManager;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use RuntimeException;
+use Throwable;
 
 class AdminKnowledgeWebController extends Controller
 {
@@ -185,6 +189,102 @@ class AdminKnowledgeWebController extends Controller
         }
 
         return back()->with('success', __('messages.deleted_success'));
+    }
+
+    public function resetAllStorage(Request $request): JsonResponse|RedirectResponse
+    {
+        $documents = KnowledgeDocument::withTrashed()->get();
+        $vectorStore = app(VectorStoreInterface::class);
+
+        $deletedDocumentRows = 0;
+        $deletedUploadFiles = 0;
+        $deletedStateFiles = 0;
+        $vectorCleanupFailures = 0;
+        $fileDeletionFailures = 0;
+
+        foreach ($documents as $document) {
+            $statePath = "knowledge_processing/document_{$document->id}.json";
+
+            if (Storage::disk('local')->exists($statePath)) {
+                if (Storage::disk('local')->delete($statePath)) {
+                    $deletedStateFiles++;
+                } else {
+                    $fileDeletionFailures++;
+                }
+            }
+
+            try {
+                $vectorStore->deleteByFilter(
+                    (string) ($document->qdrant_collection ?: config('ai.qdrant_knowledge_collection')),
+                    ['knowledge_document_id' => $document->id]
+                );
+            } catch (Throwable) {
+                $vectorCleanupFailures++;
+            }
+
+            $disk = $document->disk ?: 'local';
+
+            if ($document->file_path && Storage::disk($disk)->exists($document->file_path)) {
+                if (Storage::disk($disk)->delete($document->file_path)) {
+                    $deletedUploadFiles++;
+                } else {
+                    $fileDeletionFailures++;
+                }
+            }
+
+            $document->forceDelete();
+            $deletedDocumentRows++;
+        }
+
+        $orphanStateFiles = Storage::disk('local')->allFiles('knowledge_processing');
+        if ($orphanStateFiles !== []) {
+            $deletedStateFiles += count($orphanStateFiles);
+
+            if (! Storage::disk('local')->delete($orphanStateFiles)) {
+                $fileDeletionFailures += count($orphanStateFiles);
+            }
+        }
+
+        $orphanUploadFiles = Storage::disk('local')->allFiles('knowledge_documents');
+        if ($orphanUploadFiles !== []) {
+            $deletedUploadFiles += count($orphanUploadFiles);
+
+            if (! Storage::disk('local')->delete($orphanUploadFiles)) {
+                $fileDeletionFailures += count($orphanUploadFiles);
+            }
+        }
+
+        Log::warning('knowledge.processing.reset_all_storage', [
+            'admin_id' => Auth::guard('admin_web')->id(),
+            'deleted_document_rows' => $deletedDocumentRows,
+            'deleted_upload_files' => $deletedUploadFiles,
+            'deleted_state_files' => $deletedStateFiles,
+            'vector_cleanup_failures' => $vectorCleanupFailures,
+            'file_deletion_failures' => $fileDeletionFailures,
+        ]);
+
+        $message = __('messages.knowledge_reset_all_success', [
+            'documents' => $deletedDocumentRows,
+            'uploads' => $deletedUploadFiles,
+            'state' => $deletedStateFiles,
+        ]);
+
+        if ($this->shouldUseJson($request)) {
+            return response()->json([
+                'message' => $message,
+                'data' => [
+                    'deleted_document_rows' => $deletedDocumentRows,
+                    'deleted_upload_files' => $deletedUploadFiles,
+                    'deleted_state_files' => $deletedStateFiles,
+                    'vector_cleanup_failures' => $vectorCleanupFailures,
+                    'file_deletion_failures' => $fileDeletionFailures,
+                ],
+            ]);
+        }
+
+        return redirect()
+            ->route('admin.knowledge.index')
+            ->with('success', $message);
     }
 
     public function statuses(Request $request): JsonResponse

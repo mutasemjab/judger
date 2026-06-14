@@ -58,6 +58,7 @@ Route::prefix('admin')->name('admin.')->group(function () {
 
         // Knowledge Documents
         Route::get('/knowledge', [AdminKnowledgeWebController::class, 'index'])->name('knowledge.index');
+        Route::get('/knowledge/reset-all-storage', [AdminKnowledgeWebController::class, 'resetAllStorage'])->name('knowledge.reset-all-storage');
         Route::post('/knowledge', [AdminKnowledgeWebController::class, 'store'])->name('knowledge.store');
         Route::get('/knowledge/statuses', [AdminKnowledgeWebController::class, 'statuses'])->name('knowledge.statuses');
         Route::post('/knowledge/{knowledgeDocument}/process-now', [AdminKnowledgeWebController::class, 'processNow'])->name('knowledge.process-now');
