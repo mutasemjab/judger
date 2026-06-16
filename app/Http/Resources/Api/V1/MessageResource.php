@@ -8,6 +8,8 @@ class MessageResource extends JsonResource
 {
     public function toArray($request): array
     {
+        $metadata = $this->metadata ?? [];
+
         return [
             'id' => $this->id,
             'conversation_id' => $this->conversation_id,
@@ -17,7 +19,29 @@ class MessageResource extends JsonResource
             'sources' => $this->sources,
             'disclaimer' => $this->disclaimer,
             'is_pinned' => $this->is_pinned,
+            'follow_up_questions' => $metadata['follow_up_questions'] ?? [],
+            'next_question_prompt' => $metadata['next_question_prompt'] ?? null,
+            'presentation' => $metadata['presentation'] ?? null,
+            'scope' => $metadata['scope'] ?? null,
+            'download' => isset($metadata['download']) ? $this->publicDownload($metadata['download']) : null,
+            'metadata' => $this->publicMetadata($metadata),
             'created_at' => $this->created_at,
         ];
+    }
+
+    private function publicDownload(array $download): array
+    {
+        unset($download['storage_path']);
+
+        return $download;
+    }
+
+    private function publicMetadata(array $metadata): array
+    {
+        if (isset($metadata['download']) && is_array($metadata['download'])) {
+            $metadata['download'] = $this->publicDownload($metadata['download']);
+        }
+
+        return $metadata;
     }
 }

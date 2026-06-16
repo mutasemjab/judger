@@ -7,12 +7,14 @@ use App\Models\GeneratedDocument;
 use App\Models\Template;
 use App\Models\TemplateCategory;
 use App\Models\TemplateFavorite;
-use App\Services\AI\AiProviderManager;
+use App\Services\Documents\GeneratedFileExportService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class TemplateController extends BaseApiController
 {
+    public function __construct(private GeneratedFileExportService $exportService) {}
+
     public function categories(): JsonResponse
     {
         $categories = TemplateCategory::withCount('templates')->get();
@@ -78,11 +80,25 @@ class TemplateController extends BaseApiController
             'disclaimer' => $disclaimer,
         ]);
 
+        $download = $this->exportService->exportGeneratedDocument($document);
+
         return $this->created([
             'id' => $document->id,
             'title' => $document->title,
             'content' => $document->content,
             'disclaimer' => $disclaimer,
+            'download' => $this->exportService->publicDownloadData($download),
         ], 'Document generated.');
+    }
+
+    public function download(GeneratedDocument $document): mixed
+    {
+        if ((int) $document->user_id !== (int) auth('api')->id()) {
+            return $this->forbidden('You do not have access to this generated document.');
+        }
+
+        $download = $this->exportService->exportGeneratedDocument($document);
+
+        return $this->exportService->downloadResponse($download);
     }
 }

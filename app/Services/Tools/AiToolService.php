@@ -4,9 +4,10 @@ namespace App\Services\Tools;
 
 use App\Enums\AiToolType;
 use App\Models\AiToolOutput;
-use App\Models\CaseDocument;
 use App\Models\LegalCase;
 use App\Services\AI\AiProviderManager;
+use App\Services\AI\LegalExperienceService;
+use App\Services\Documents\GeneratedFileExportService;
 use App\Services\Search\CaseDocumentSearchService;
 use App\Services\Search\KnowledgeSearchService;
 
@@ -14,8 +15,10 @@ class AiToolService
 {
     private string $disclaimer;
 
-    public function __construct()
-    {
+    public function __construct(
+        private LegalExperienceService $experience,
+        private GeneratedFileExportService $exportService
+    ) {
         $this->disclaimer = config('ai.legal_disclaimer');
     }
 
@@ -26,7 +29,7 @@ class AiToolService
 
         $provider = AiProviderManager::resolve();
         $answer = $provider->chat([
-            ['role' => 'system', 'content' => 'You are Judger AI, a legal information assistant. ' . $this->disclaimer],
+            ['role' => 'system', 'content' => config('ai.system_prompt')],
             ['role' => 'user', 'content' => $prompt],
         ]);
 
@@ -34,26 +37,41 @@ class AiToolService
             $answer .= "\n\n" . $this->disclaimer;
         }
 
+        $experience = $this->experience->buildToolPayload($toolType, $answer, $context['sources']);
+
         $output = AiToolOutput::create([
             'user_id' => $userId,
             'legal_case_id' => $input['legal_case_id'] ?? null,
             'case_document_id' => $input['case_document_id'] ?? null,
             'tool_type' => $toolType->value,
             'input' => $input,
-            'content' => $answer,
-            'output' => ['result' => $answer],
+            'content' => $experience['content'],
+            'output' => [
+                'result' => $experience['content'],
+                'follow_up_questions' => $experience['follow_up_questions'],
+                'next_question_prompt' => $experience['next_question_prompt'],
+                'presentation' => $experience['presentation'],
+                'scope' => $experience['scope'],
+            ],
             'disclaimer' => $this->disclaimer,
             'source_type' => $context['source_type'],
             'sources' => $context['sources'],
         ]);
 
+        $download = $this->exportService->exportAiToolOutput($output);
+
         return [
             'id' => $output->id,
             'tool_type' => $toolType->value,
-            'content' => $answer,
+            'content' => $experience['content'],
             'disclaimer' => $this->disclaimer,
             'sources' => $context['sources'],
             'source_type' => $context['source_type'],
+            'follow_up_questions' => $experience['follow_up_questions'],
+            'next_question_prompt' => $experience['next_question_prompt'],
+            'presentation' => $experience['presentation'],
+            'scope' => $experience['scope'],
+            'download' => $this->exportService->publicDownloadData($download),
         ];
     }
 

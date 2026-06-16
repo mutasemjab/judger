@@ -6,13 +6,17 @@ use App\Enums\AiToolType;
 use App\Http\Requests\Api\V1\AiToolRequest;
 use App\Http\Resources\Api\V1\AiToolOutputResource;
 use App\Models\AiToolOutput;
+use App\Services\Documents\GeneratedFileExportService;
 use App\Services\Tools\AiToolService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class AiToolController extends BaseApiController
 {
-    public function __construct(private AiToolService $toolService) {}
+    public function __construct(
+        private AiToolService $toolService,
+        private GeneratedFileExportService $exportService
+    ) {}
 
     private function runTool(AiToolType $toolType, AiToolRequest $request): JsonResponse
     {
@@ -45,5 +49,16 @@ class AiToolController extends BaseApiController
         return $this->paginated(
             new \Illuminate\Http\Resources\Json\AnonymousResourceCollection($history, AiToolOutputResource::class)
         );
+    }
+
+    public function download(AiToolOutput $output): mixed
+    {
+        if ((int) $output->user_id !== (int) auth('api')->id()) {
+            return $this->forbidden('You do not have access to this AI output.');
+        }
+
+        $download = $this->exportService->exportAiToolOutput($output);
+
+        return $this->exportService->downloadResponse($download);
     }
 }

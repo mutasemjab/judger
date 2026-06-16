@@ -11,12 +11,20 @@ use App\Models\CaseMemory;
 use App\Models\Conversation;
 use App\Models\Message;
 use App\Services\AI\AiProviderManager;
+use App\Services\AI\LegalExperienceService;
+use App\Services\Documents\GeneratedFileExportService;
 use App\Services\Search\CaseDocumentSearchService;
 use App\Services\Search\KnowledgeSearchService;
 use RuntimeException;
 
 class LegalChatService
 {
+    public function __construct(
+        private LegalScopeGuard $scopeGuard,
+        private LegalExperienceService $experience,
+        private GeneratedFileExportService $exportService
+    ) {}
+
     public function ask(int $userId, int $conversationId, string $message): array
     {
         $conversation = Conversation::where('id', $conversationId)
@@ -43,6 +51,15 @@ class LegalChatService
         $legalCase = $conversation->legalCase;
         if (!$legalCase || $legalCase->user_id !== $userId) {
             throw new RuntimeException('Case not found or access denied.');
+        }
+
+        $scope = $this->scopeGuard->allowsConversationMessage($conversation, $message);
+        if (! $scope['allowed']) {
+            return $this->storeRedirectResponse(
+                conversation: $conversation,
+                legalCaseId: $legalCase->id,
+                disclaimer: config('ai.legal_disclaimer')
+            );
         }
 
         $caseSearchService = new CaseDocumentSearchService();
@@ -106,17 +123,23 @@ class LegalChatService
 
         $sourceType = $this->determineSourceType($caseResults, $kbResults);
         $sources = $this->buildSources($caseResults, $kbResults);
+        $experience = $this->experience->buildConversationPayload($conversation, $answer, $scope['reason'], $sources);
 
         $assistantMessage = Message::create([
             'conversation_id' => $conversation->id,
             'user_id' => null,
             'legal_case_id' => $legalCase->id,
             'role' => MessageRole::Assistant->value,
-            'content' => $answer,
+            'content' => $experience['answer'],
             'source_type' => $sourceType->value,
             'sources' => $sources,
             'disclaimer' => $disclaimer,
         ]);
+
+        $download = $this->exportService->exportMessage($assistantMessage);
+        $assistantMessage->forceFill([
+            'metadata' => $this->experience->messageMetadata($experience, $download),
+        ])->save();
 
         $conversation->update(['last_message_at' => now()]);
 
@@ -127,12 +150,17 @@ class LegalChatService
         }
 
         return [
-            'answer' => $answer,
+            'answer' => $experience['answer'],
             'disclaimer' => $disclaimer,
             'source_type' => $sourceType->value,
             'sources' => $sources,
             'conversation_id' => $conversation->id,
             'message_id' => $assistantMessage->id,
+            'follow_up_questions' => $experience['follow_up_questions'],
+            'next_question_prompt' => $experience['next_question_prompt'],
+            'presentation' => $experience['presentation'],
+            'scope' => $experience['scope'],
+            'download' => $this->exportService->publicDownloadData($download),
         ];
     }
 
@@ -140,6 +168,15 @@ class LegalChatService
     {
         if ($conversation->legal_case_id !== null) {
             throw new RuntimeException('General conversation must not be linked to a case.');
+        }
+
+        $scope = $this->scopeGuard->allowsConversationMessage($conversation, $message);
+        if (! $scope['allowed']) {
+            return $this->storeRedirectResponse(
+                conversation: $conversation,
+                legalCaseId: null,
+                disclaimer: config('ai.legal_disclaimer')
+            );
         }
 
         $kbSearchService = new KnowledgeSearchService();
@@ -182,27 +219,80 @@ class LegalChatService
 
         $sourceType = empty($kbResults) ? MessageSourceType::None : MessageSourceType::KnowledgeBase;
         $sources = $this->buildSources([], $kbResults);
+        $experience = $this->experience->buildConversationPayload($conversation, $answer, $scope['reason'], $sources);
 
         $assistantMessage = Message::create([
             'conversation_id' => $conversation->id,
             'user_id' => null,
             'legal_case_id' => null,
             'role' => MessageRole::Assistant->value,
-            'content' => $answer,
+            'content' => $experience['answer'],
             'source_type' => $sourceType->value,
             'sources' => $sources,
             'disclaimer' => $disclaimer,
         ]);
+
+        $download = $this->exportService->exportMessage($assistantMessage);
+        $assistantMessage->forceFill([
+            'metadata' => $this->experience->messageMetadata($experience, $download),
+        ])->save();
+
+        $conversation->update(['last_message_at' => now()]);
+
+        return [
+            'answer' => $experience['answer'],
+            'disclaimer' => $disclaimer,
+            'source_type' => $sourceType->value,
+            'sources' => $sources,
+            'conversation_id' => $conversation->id,
+            'message_id' => $assistantMessage->id,
+            'follow_up_questions' => $experience['follow_up_questions'],
+            'next_question_prompt' => $experience['next_question_prompt'],
+            'presentation' => $experience['presentation'],
+            'scope' => $experience['scope'],
+            'download' => $this->exportService->publicDownloadData($download),
+        ];
+    }
+
+    private function storeRedirectResponse(Conversation $conversation, ?int $legalCaseId, string $disclaimer): array
+    {
+        $experience = $this->experience->buildNonLegalRedirectPayload();
+        $answer = $experience['answer'];
+
+        if (! str_contains($answer, $disclaimer)) {
+            $answer .= "\n\n" . $disclaimer;
+        }
+
+        $assistantMessage = Message::create([
+            'conversation_id' => $conversation->id,
+            'user_id' => null,
+            'legal_case_id' => $legalCaseId,
+            'role' => MessageRole::Assistant->value,
+            'content' => $answer,
+            'source_type' => MessageSourceType::None->value,
+            'sources' => [],
+            'disclaimer' => $disclaimer,
+        ]);
+
+        $download = $this->exportService->exportMessage($assistantMessage);
+        $assistantMessage->forceFill([
+            'metadata' => $this->experience->messageMetadata($experience, $download),
+        ])->save();
 
         $conversation->update(['last_message_at' => now()]);
 
         return [
             'answer' => $answer,
             'disclaimer' => $disclaimer,
-            'source_type' => $sourceType->value,
-            'sources' => $sources,
+            'source_type' => MessageSourceType::None->value,
+            'sources' => [],
             'conversation_id' => $conversation->id,
             'message_id' => $assistantMessage->id,
+            'follow_up_questions' => $experience['follow_up_questions'],
+            'next_question_prompt' => $experience['next_question_prompt'],
+            'presentation' => $experience['presentation'],
+            'scope' => $experience['scope'],
+            'download' => $this->exportService->publicDownloadData($download),
         ];
     }
 

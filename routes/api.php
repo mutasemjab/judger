@@ -61,6 +61,7 @@ Route::prefix('v1')->group(function () {
         // Messages
         Route::post('/messages/{message}/pin', [MessageController::class, 'pin']);
         Route::post('/messages/{message}/save-as-note', [MessageController::class, 'saveAsNote']);
+        Route::get('/messages/{message}/download', [MessageController::class, 'download']);
 
         // AI Tools
         Route::prefix('ai-tools')->middleware('throttle:30,1')->group(function () {
@@ -76,6 +77,7 @@ Route::prefix('v1')->group(function () {
             Route::post('/client-explanation-simplifier', [AiToolController::class, 'clientExplanationSimplifier']);
             Route::post('/defense-assistant', [AiToolController::class, 'defenseAssistant']);
             Route::get('/history', [AiToolController::class, 'history']);
+            Route::get('/{output}/download', [AiToolController::class, 'download']);
         });
 
         // Hearings / Calendar
@@ -98,6 +100,7 @@ Route::prefix('v1')->group(function () {
         Route::get('/templates/{template}', [TemplateController::class, 'show']);
         Route::post('/templates/{template}/favorite', [TemplateController::class, 'favorite']);
         Route::post('/templates/{template}/generate', [TemplateController::class, 'generate']);
+        Route::get('/generated-documents/{document}/download', [TemplateController::class, 'download']);
 
         // Notifications
         Route::get('/notifications', [NotificationController::class, 'index']);

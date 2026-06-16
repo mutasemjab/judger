@@ -7,8 +7,11 @@ use App\Http\Requests\Api\V1\RegisterRequest;
 use App\Http\Resources\Api\V1\UserResource;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Auth\Events\PasswordReset;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Password;
+use Illuminate\Support\Str;
 use Tymon\JWTAuth\Facades\JWTAuth;
 
 class AuthController extends BaseApiController
@@ -136,7 +139,15 @@ class AuthController extends BaseApiController
     {
         $request->validate(['email' => 'required|email']);
 
-        return $this->success(null, 'If this email exists, a reset link has been sent.');
+        $status = Password::broker()->sendResetLink(
+            $request->only('email')
+        );
+
+        if (in_array($status, [Password::RESET_LINK_SENT, Password::INVALID_USER], true)) {
+            return $this->success(null, 'If this email exists, a reset link has been sent.');
+        }
+
+        return $this->error(__($status), 422);
     }
 
     public function resetPassword(Request $request): JsonResponse
@@ -146,6 +157,22 @@ class AuthController extends BaseApiController
             'email' => 'required|email',
             'password' => 'required|string|min:8|confirmed',
         ]);
+
+        $status = Password::broker()->reset(
+            $request->only('email', 'password', 'password_confirmation', 'token'),
+            function (User $user, string $password): void {
+                $user->forceFill([
+                    'password' => Hash::make($password),
+                    'remember_token' => Str::random(60),
+                ])->save();
+
+                event(new PasswordReset($user));
+            }
+        );
+
+        if ($status !== Password::PASSWORD_RESET) {
+            return $this->error(__($status), 422);
+        }
 
         return $this->success(null, 'Password reset successful.');
     }

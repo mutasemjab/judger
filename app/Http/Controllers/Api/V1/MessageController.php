@@ -6,10 +6,13 @@ use App\Enums\NoteType;
 use App\Http\Resources\Api\V1\MessageResource;
 use App\Models\Message;
 use App\Models\Note;
+use App\Services\Documents\GeneratedFileExportService;
 use Illuminate\Http\JsonResponse;
 
 class MessageController extends BaseApiController
 {
+    public function __construct(private GeneratedFileExportService $exportService) {}
+
     public function pin(Message $message): JsonResponse
     {
         $this->authorize('pin', $message);
@@ -30,5 +33,14 @@ class MessageController extends BaseApiController
         ]);
 
         return $this->created(['note_id' => $note->id], 'Message saved as note.');
+    }
+
+    public function download(Message $message): mixed
+    {
+        $this->authorize('view', $message);
+
+        $download = $this->exportService->exportMessage($message);
+
+        return $this->exportService->downloadResponse($download);
     }
 }
