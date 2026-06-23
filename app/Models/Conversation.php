@@ -37,6 +37,11 @@ class Conversation extends Model
         return $this->hasMany(Message::class);
     }
 
+    public function attachments(): HasMany
+    {
+        return $this->hasMany(ChatAttachment::class);
+    }
+
     public function isGeneral(): bool
     {
         return $this->type === ConversationType::General;

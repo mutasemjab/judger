@@ -9,7 +9,6 @@ use App\Http\Resources\Api\V1\ConversationResource;
 use App\Http\Resources\Api\V1\MessageResource;
 use App\Models\Conversation;
 use App\Models\LegalCase;
-use App\Models\Message;
 use App\Repositories\ConversationRepository;
 use App\Services\Chat\LegalChatService;
 use Illuminate\Http\JsonResponse;
@@ -20,7 +19,8 @@ class ConversationController extends BaseApiController
     public function __construct(
         private ConversationRepository $repository,
         private LegalChatService $chatService
-    ) {}
+    ) {
+    }
 
     public function index(Request $request): JsonResponse
     {
@@ -29,6 +29,7 @@ class ConversationController extends BaseApiController
             $request->only(['type']),
             $request->integer('per_page', 15)
         );
+
         return $this->paginated(
             new \Illuminate\Http\Resources\Json\AnonymousResourceCollection($paginator, ConversationResource::class)
         );
@@ -42,7 +43,7 @@ class ConversationController extends BaseApiController
 
         if ($type === ConversationType::Case->value) {
             $case = LegalCase::where('id', $request->legal_case_id)->where('user_id', $userId)->first();
-            if (!$case) {
+            if (! $case) {
                 return $this->error('Case not found or access denied.', 404);
             }
             $legalCaseId = $case->id;
@@ -61,6 +62,7 @@ class ConversationController extends BaseApiController
     public function show(Conversation $conversation): JsonResponse
     {
         $this->authorize('view', $conversation);
+
         return $this->success(new ConversationResource($conversation));
     }
 
@@ -68,6 +70,7 @@ class ConversationController extends BaseApiController
     {
         $this->authorize('delete', $conversation);
         $conversation->delete();
+
         return $this->success(null, 'Conversation deleted.');
     }
 
@@ -76,6 +79,7 @@ class ConversationController extends BaseApiController
         $this->authorize('view', $conversation);
 
         $messages = $conversation->messages()
+            ->with('attachments')
             ->orderBy('created_at')
             ->paginate($request->integer('per_page', 30));
 
@@ -89,10 +93,16 @@ class ConversationController extends BaseApiController
         $this->authorize('view', $conversation);
 
         try {
-            $result = $this->chatService->ask(auth('api')->id(), $conversation->id, $request->message);
+            $result = $this->chatService->ask(
+                auth('api')->id(),
+                $conversation->id,
+                $request->message,
+                $request->input('attachment_ids', [])
+            );
+
             return $this->success($result, 'AI response generated successfully.');
         } catch (\Throwable $e) {
-            return $this->error('Failed to generate response: ' . $e->getMessage(), 500);
+            return $this->error('Failed to generate response: '.$e->getMessage(), 500);
         }
     }
 }

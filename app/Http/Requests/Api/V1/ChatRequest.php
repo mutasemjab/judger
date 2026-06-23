@@ -15,6 +15,8 @@ class ChatRequest extends FormRequest
     {
         return [
             'message' => 'required|string|max:4000',
+            'attachment_ids' => 'sometimes|array|max:5',
+            'attachment_ids.*' => 'integer|exists:chat_attachments,id',
         ];
     }
 }

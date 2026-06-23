@@ -1,8 +1,9 @@
 <?php
 
-use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\AiToolController;
+use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\CaseDocumentController;
+use App\Http\Controllers\Api\V1\ChatAttachmentController;
 use App\Http\Controllers\Api\V1\ConversationController;
 use App\Http\Controllers\Api\V1\GlobalSearchController;
 use App\Http\Controllers\Api\V1\HearingController;
@@ -56,7 +57,10 @@ Route::prefix('v1')->group(function () {
         // Conversations
         Route::apiResource('conversations', ConversationController::class)->except(['update']);
         Route::get('/conversations/{conversation}/messages', [ConversationController::class, 'messages']);
+        Route::get('/conversations/{conversation}/attachments', [ChatAttachmentController::class, 'index']);
         Route::post('/conversations/{conversation}/chat', [ConversationController::class, 'chat'])->middleware('throttle:60,1');
+        Route::post('/attachments', [ChatAttachmentController::class, 'store'])->middleware('throttle:20,1');
+        Route::delete('/attachments/{attachment}', [ChatAttachmentController::class, 'destroy']);
 
         // Messages
         Route::post('/messages/{message}/pin', [MessageController::class, 'pin']);
@@ -124,7 +128,6 @@ Route::prefix('v1')->group(function () {
         Route::put('/settings', [SettingController::class, 'updateSettings']);
         Route::post('/data-export', [SettingController::class, 'requestDataExport']);
         Route::get('/legal-disclaimer', [SettingController::class, 'legalDisclaimer']);
-
 
     });
 });

@@ -8,6 +8,7 @@ use App\Enums\MessageSourceType;
 use App\Jobs\SummarizeConversationJob;
 use App\Jobs\UpdateCaseMemoryJob;
 use App\Models\CaseMemory;
+use App\Models\ChatAttachment;
 use App\Models\Conversation;
 use App\Models\Message;
 use App\Services\AI\AiProviderManager;
@@ -23,9 +24,10 @@ class LegalChatService
         private LegalScopeGuard $scopeGuard,
         private LegalExperienceService $experience,
         private GeneratedFileExportService $exportService
-    ) {}
+    ) {
+    }
 
-    public function ask(int $userId, int $conversationId, string $message): array
+    public function ask(int $userId, int $conversationId, string $message, array $attachmentIds = []): array
     {
         $conversation = Conversation::where('id', $conversationId)
             ->where('user_id', $userId)
@@ -39,17 +41,19 @@ class LegalChatService
             'content' => $message,
         ]);
 
+        $attachments = $this->claimAttachments($conversation, $userMessage, $userId, $attachmentIds);
+
         if ($conversation->type === ConversationType::Case) {
-            return $this->handleCaseChat($conversation, $userMessage, $message, $userId);
+            return $this->handleCaseChat($conversation, $userMessage, $message, $userId, $attachments);
         }
 
-        return $this->handleGeneralChat($conversation, $userMessage, $message, $userId);
+        return $this->handleGeneralChat($conversation, $userMessage, $message, $userId, $attachments);
     }
 
-    private function handleCaseChat(Conversation $conversation, Message $userMessage, string $message, int $userId): array
+    private function handleCaseChat(Conversation $conversation, Message $userMessage, string $message, int $userId, $attachments): array
     {
         $legalCase = $conversation->legalCase;
-        if (!$legalCase || $legalCase->user_id !== $userId) {
+        if (! $legalCase || $legalCase->user_id !== $userId) {
             throw new RuntimeException('Case not found or access denied.');
         }
 
@@ -82,29 +86,33 @@ class LegalChatService
 
         $contextParts = [];
 
-        if (!empty($caseResults)) {
-            $contextParts[] = "CASE DOCUMENT SOURCES:\n\n" . $this->formatCaseResults($caseResults);
+        if (! empty($caseResults)) {
+            $contextParts[] = "CASE DOCUMENT SOURCES:\n\n".$this->formatCaseResults($caseResults);
         }
 
-        $contextParts[] = "CASE CONTEXT:\n\n" .
-            "Case title: {$legalCase->title}\n" .
-            "Jurisdiction: " . ($legalCase->jurisdiction ?? 'Not specified') . "\n" .
-            "Court: " . ($legalCase->court ?? 'Not specified') . "\n" .
-            "Client: " . ($legalCase->client_name ?? 'Not specified') . "\n" .
-            "Opposing party: " . ($legalCase->opposing_party ?? 'Not specified') . "\n" .
-            "Summary: " . ($legalCase->summary ?? 'No summary yet') . "\n" .
-            "Memories:\n" . $memories->map(fn($m) => "- [{$m->type?->value}] {$m->title}: {$m->content}")->join("\n");
+        $contextParts[] = "CASE CONTEXT:\n\n".
+            "Case title: {$legalCase->title}\n".
+            'Jurisdiction: '.($legalCase->jurisdiction ?? 'Not specified')."\n".
+            'Court: '.($legalCase->court ?? 'Not specified')."\n".
+            'Client: '.($legalCase->client_name ?? 'Not specified')."\n".
+            'Opposing party: '.($legalCase->opposing_party ?? 'Not specified')."\n".
+            'Summary: '.($legalCase->summary ?? 'No summary yet')."\n".
+            "Memories:\n".$memories->map(fn ($m) => "- [{$m->type?->value}] {$m->title}: {$m->content}")->join("\n");
 
-        if (!empty($kbResults)) {
-            $contextParts[] = "KNOWLEDGE BASE SOURCES:\n\n" . $this->formatKbResults($kbResults);
+        if (! empty($kbResults)) {
+            $contextParts[] = "KNOWLEDGE BASE SOURCES:\n\n".$this->formatKbResults($kbResults);
+        }
+
+        if ($attachments->isNotEmpty()) {
+            $contextParts[] = "USER ATTACHMENTS:\n\n".$this->formatAttachments($attachments);
         }
 
         if ($recentMessages->isNotEmpty()) {
-            $contextParts[] = "RECENT CONVERSATION:\n\n" . $recentMessages->map(fn($m) => ucfirst($m->role->value) . ': ' . $m->content)->join("\n\n");
+            $contextParts[] = "RECENT CONVERSATION:\n\n".$recentMessages->map(fn ($m) => ucfirst($m->role->value).': '.$m->content)->join("\n\n");
         }
 
         $contextParts[] = "QUESTION:\n{$message}";
-        $contextParts[] = "Answer using only the provided context. Cite source labels. Include the required legal disclaimer.";
+        $contextParts[] = 'Answer using only the provided context. Cite source labels. Include the required legal disclaimer.';
 
         $fullContext = implode("\n\n---\n\n", $contextParts);
 
@@ -117,8 +125,8 @@ class LegalChatService
         ]);
 
         $disclaimer = config('ai.legal_disclaimer');
-        if (!str_contains($answer, $disclaimer)) {
-            $answer .= "\n\n" . $disclaimer;
+        if (! str_contains($answer, $disclaimer)) {
+            $answer .= "\n\n".$disclaimer;
         }
 
         $sourceType = $this->determineSourceType($caseResults, $kbResults);
@@ -164,7 +172,7 @@ class LegalChatService
         ];
     }
 
-    private function handleGeneralChat(Conversation $conversation, Message $userMessage, string $message, int $userId): array
+    private function handleGeneralChat(Conversation $conversation, Message $userMessage, string $message, int $userId, $attachments): array
     {
         if ($conversation->legal_case_id !== null) {
             throw new RuntimeException('General conversation must not be linked to a case.');
@@ -191,16 +199,20 @@ class LegalChatService
 
         $contextParts = [];
 
-        if (!empty($kbResults)) {
-            $contextParts[] = "KNOWLEDGE BASE SOURCES:\n\n" . $this->formatKbResults($kbResults);
+        if (! empty($kbResults)) {
+            $contextParts[] = "KNOWLEDGE BASE SOURCES:\n\n".$this->formatKbResults($kbResults);
+        }
+
+        if ($attachments->isNotEmpty()) {
+            $contextParts[] = "USER ATTACHMENTS:\n\n".$this->formatAttachments($attachments);
         }
 
         if ($recentMessages->isNotEmpty()) {
-            $contextParts[] = "RECENT CONVERSATION:\n\n" . $recentMessages->map(fn($m) => ucfirst($m->role->value) . ': ' . $m->content)->join("\n\n");
+            $contextParts[] = "RECENT CONVERSATION:\n\n".$recentMessages->map(fn ($m) => ucfirst($m->role->value).': '.$m->content)->join("\n\n");
         }
 
         $contextParts[] = "QUESTION:\n{$message}";
-        $contextParts[] = "Answer using only the provided context. Cite source labels. Include the required legal disclaimer.";
+        $contextParts[] = 'Answer using only the provided context. Cite source labels. Include the required legal disclaimer.';
 
         $fullContext = implode("\n\n---\n\n", $contextParts);
 
@@ -213,8 +225,8 @@ class LegalChatService
         ]);
 
         $disclaimer = config('ai.legal_disclaimer');
-        if (!str_contains($answer, $disclaimer)) {
-            $answer .= "\n\n" . $disclaimer;
+        if (! str_contains($answer, $disclaimer)) {
+            $answer .= "\n\n".$disclaimer;
         }
 
         $sourceType = empty($kbResults) ? MessageSourceType::None : MessageSourceType::KnowledgeBase;
@@ -260,7 +272,7 @@ class LegalChatService
         $answer = $experience['answer'];
 
         if (! str_contains($answer, $disclaimer)) {
-            $answer .= "\n\n" . $disclaimer;
+            $answer .= "\n\n".$disclaimer;
         }
 
         $assistantMessage = Message::create([
@@ -296,6 +308,51 @@ class LegalChatService
         ];
     }
 
+    private function claimAttachments(Conversation $conversation, Message $message, int $userId, array $attachmentIds)
+    {
+        $ids = collect($attachmentIds)
+            ->map(fn ($id) => (int) $id)
+            ->filter()
+            ->unique()
+            ->values();
+
+        if ($ids->isEmpty()) {
+            return collect();
+        }
+
+        $attachments = ChatAttachment::whereIn('id', $ids)
+            ->where('user_id', $userId)
+            ->where('conversation_id', $conversation->id)
+            ->whereNull('message_id')
+            ->get();
+
+        $attachments->each(function (ChatAttachment $attachment) use ($message): void {
+            $attachment->forceFill(['message_id' => $message->id])->save();
+        });
+        $message->load('attachments');
+
+        return $attachments;
+    }
+
+    private function formatAttachments($attachments): string
+    {
+        return $attachments->values()->map(function (ChatAttachment $attachment, int $index): string {
+            $n = $index + 1;
+            $text = trim((string) $attachment->extracted_text);
+
+            if ($text === '') {
+                $text = $attachment->isImage()
+                    ? 'Image attachment. Use the file name and user question; visual analysis is not available in this text model.'
+                    : 'No readable text was extracted from this file.';
+            }
+
+            return "[ATTACHMENT_{$n}]\n"
+                ."File: {$attachment->original_name}\n"
+                .'Type: '.($attachment->mime_type ?: 'unknown')."\n"
+                ."Content:\n{$text}";
+        })->join("\n\n");
+    }
+
     private function formatCaseResults(array $results): string
     {
         $output = '';
@@ -303,12 +360,13 @@ class LegalChatService
             $n = $i + 1;
             $payload = $result['payload'] ?? [];
             $output .= "[CASE_SOURCE_{$n}]\n";
-            $output .= "File: " . ($payload['document_name'] ?? 'Unknown') . "\n";
-            $output .= "Document Type: " . ($payload['document_type'] ?? 'Unknown') . "\n";
-            $output .= "Page: " . ($payload['page_number'] ?? '?') . "\n";
-            $output .= "Chunk ID: case_" . ($payload['case_document_id'] ?? '?') . "_" . ($payload['chunk_index'] ?? '?') . "\n";
-            $output .= "Text:\n" . ($payload['content'] ?? '') . "\n\n";
+            $output .= 'File: '.($payload['document_name'] ?? 'Unknown')."\n";
+            $output .= 'Document Type: '.($payload['document_type'] ?? 'Unknown')."\n";
+            $output .= 'Page: '.($payload['page_number'] ?? '?')."\n";
+            $output .= 'Chunk ID: case_'.($payload['case_document_id'] ?? '?').'_'.($payload['chunk_index'] ?? '?')."\n";
+            $output .= "Text:\n".($payload['content'] ?? '')."\n\n";
         }
+
         return $output;
     }
 
@@ -319,26 +377,28 @@ class LegalChatService
             $n = $i + 1;
             $payload = $result['payload'] ?? [];
             $output .= "[KB_SOURCE_{$n}]\n";
-            $output .= "File: " . ($payload['document_name'] ?? 'Unknown') . "\n";
-            $output .= "Category: " . ($payload['category'] ?? 'general') . "\n";
-            $output .= "Page: " . ($payload['page_number'] ?? '?') . "\n";
-            $output .= "Chunk ID: kb_" . ($payload['knowledge_document_id'] ?? '?') . "_" . ($payload['chunk_index'] ?? '?') . "\n";
-            $output .= "Text:\n" . ($payload['content'] ?? '') . "\n\n";
+            $output .= 'File: '.($payload['document_name'] ?? 'Unknown')."\n";
+            $output .= 'Category: '.($payload['category'] ?? 'general')."\n";
+            $output .= 'Page: '.($payload['page_number'] ?? '?')."\n";
+            $output .= 'Chunk ID: kb_'.($payload['knowledge_document_id'] ?? '?').'_'.($payload['chunk_index'] ?? '?')."\n";
+            $output .= "Text:\n".($payload['content'] ?? '')."\n\n";
         }
+
         return $output;
     }
 
     private function determineSourceType(array $caseResults, array $kbResults): MessageSourceType
     {
-        if (!empty($caseResults) && !empty($kbResults)) {
+        if (! empty($caseResults) && ! empty($kbResults)) {
             return MessageSourceType::Mixed;
         }
-        if (!empty($caseResults)) {
+        if (! empty($caseResults)) {
             return MessageSourceType::CaseDocument;
         }
-        if (!empty($kbResults)) {
+        if (! empty($kbResults)) {
             return MessageSourceType::KnowledgeBase;
         }
+
         return MessageSourceType::None;
     }
 
@@ -353,7 +413,7 @@ class LegalChatService
                 'source_type' => 'case_document',
                 'file_name' => $p['document_name'] ?? '',
                 'page_number' => $p['page_number'] ?? null,
-                'chunk_id' => "case_" . ($p['case_document_id'] ?? '') . "_" . ($p['chunk_index'] ?? ''),
+                'chunk_id' => 'case_'.($p['case_document_id'] ?? '').'_'.($p['chunk_index'] ?? ''),
                 'similarity' => round($r['score'] ?? 0, 2),
                 'snippet' => $p['snippet'] ?? '',
             ];
@@ -366,11 +426,12 @@ class LegalChatService
                 'source_type' => 'knowledge_base',
                 'file_name' => $p['document_name'] ?? '',
                 'page_number' => $p['page_number'] ?? null,
-                'chunk_id' => "kb_" . ($p['knowledge_document_id'] ?? '') . "_" . ($p['chunk_index'] ?? ''),
+                'chunk_id' => 'kb_'.($p['knowledge_document_id'] ?? '').'_'.($p['chunk_index'] ?? ''),
                 'similarity' => round($r['score'] ?? 0, 2),
                 'snippet' => $p['snippet'] ?? '',
             ];
         }
+
         return $sources;
     }
 }

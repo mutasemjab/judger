@@ -51,4 +51,9 @@ class Message extends Model
     {
         return $this->hasMany(self::class, 'parent_message_id');
     }
+
+    public function attachments(): HasMany
+    {
+        return $this->hasMany(ChatAttachment::class);
+    }
 }
