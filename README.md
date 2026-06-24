@@ -264,17 +264,34 @@ Seed plans: `php artisan db:seed --class=PlanSeeder`
 Upload documents via admin panel or via CLI:
 
 ```bash
-# Ingest all files in storage/app/knowledge/
+# Preview files before importing
+php artisan knowledge:ingest /absolute/path/to/knowledge-files --dry-run
+
+# Import local files and generate embeddings immediately
+php artisan knowledge:ingest /absolute/path/to/knowledge-files --category=legal --process
+
+# Re-run embeddings for files that were already imported
+php artisan knowledge:ingest /absolute/path/to/knowledge-files --category=legal --process --force
+
+# Register all files in storage/app/public/knowledge/ without processing
 php artisan knowledge:ingest
 
-# Ingest with category, synchronously
-php artisan knowledge:ingest --category=autism --sync
+# Queue processing jobs instead of processing inside the command
+php artisan knowledge:ingest --category=autism --queue
 
-# Custom path
-php artisan knowledge:ingest my/custom/path
+# Process a custom storage path immediately
+php artisan knowledge:ingest my/custom/path --process
 ```
 
-Supported formats: **PDF, DOCX, TXT**
+Supported formats: **PDF, DOC, DOCX, PPTX, TXT**. Legacy `.doc` extraction depends on available system tools such as `antiword`, `catdoc`, or `textutil`.
+
+Before running a real embedding job, make sure `.env` uses a real embedding provider:
+
+```env
+AI_EMBEDDING_PROVIDER=openai
+AI_EMBEDDING_MODEL=text-embedding-3-small
+OPENAI_API_KEY=your-openai-key
+```
 
 ---
 

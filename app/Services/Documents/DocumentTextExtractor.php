@@ -38,6 +38,13 @@ class DocumentTextExtractor
         }
 
         if (
+            str_contains($mimeType, 'msword') ||
+            str_ends_with($lowerPath, '.doc')
+        ) {
+            return $this->extractLegacyDoc($absolutePath);
+        }
+
+        if (
             str_contains($mimeType, 'presentationml') ||
             str_ends_with($lowerPath, '.pptx')
         ) {
@@ -124,6 +131,49 @@ class DocumentTextExtractor
         } catch (\Throwable $e) {
             return [['page' => 1, 'text' => '']];
         }
+    }
+
+    private function extractLegacyDoc(string $path): array
+    {
+        $strategies = [
+            'antiword' => ['antiword', $path],
+            'catdoc' => ['catdoc', '-d', 'utf-8', $path],
+            'textutil' => ['textutil', '-convert', 'txt', '-stdout', $path],
+        ];
+
+        foreach ($strategies as $strategyName => $command) {
+            if (! $this->commandExists($command[0])) {
+                continue;
+            }
+
+            try {
+                $text = $this->runCommand($command, throwOnFailure: false);
+                $normalized = $this->normalizeBlockText((string) $text);
+
+                if ($normalized !== '') {
+                    Log::info('knowledge.extractor.legacy_doc_strategy', [
+                        'file' => basename($path),
+                        'strategy' => $strategyName,
+                        'status' => 'success',
+                        'characters' => mb_strlen($normalized),
+                    ]);
+
+                    return [['page' => 1, 'text' => $normalized]];
+                }
+            } catch (Throwable) {
+                Log::info('knowledge.extractor.legacy_doc_strategy', [
+                    'file' => basename($path),
+                    'strategy' => $strategyName,
+                    'status' => 'failed',
+                ]);
+            }
+        }
+
+        Log::warning('knowledge.extractor.legacy_doc_failed', [
+            'file' => basename($path),
+        ]);
+
+        return [['page' => 1, 'text' => '']];
     }
 
     private function extractPptx(string $path): array
