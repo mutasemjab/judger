@@ -25,7 +25,7 @@ class LegalChatExperienceTest extends TestCase
         Storage::fake('local');
     }
 
-    public function test_chat_refuses_non_legal_questions_with_styled_redirect(): void
+    public function test_chat_sends_uncertain_scope_to_llm_instead_of_backend_redirect(): void
     {
         $user = User::factory()->create();
         $conversation = Conversation::factory()->create([
@@ -33,16 +33,48 @@ class LegalChatExperienceTest extends TestCase
             'title' => 'General Legal Chat',
         ]);
 
+        $provider = new class implements LlmProviderInterface {
+            public array $chatMessages = [];
+
+            public function chat(array $messages, array $options = []): string
+            {
+                $this->chatMessages = $messages;
+
+                return "## Legal Scope\n\nI can only help with legal questions here.";
+            }
+
+            public function chatJson(array $messages, array $schema = [], array $options = []): array
+            {
+                return [];
+            }
+
+            public function embedding(string $text): array
+            {
+                return [1.0, 0.0];
+            }
+
+            public function embeddingMany(array $texts): array
+            {
+                return array_fill(0, count($texts), [1.0, 0.0]);
+            }
+        };
+
+        $this->app->instance(MockLlmProvider::class, $provider);
+
         $response = $this->apiAs($user)->postJson("/api/v1/conversations/{$conversation->id}/chat", [
             'message' => 'Tell me a joke about coffee.',
         ]);
 
         $response->assertOk()
-            ->assertJsonPath('data.scope.allowed', false)
-            ->assertJsonPath('data.scope.reason', 'non_legal_topic')
-            ->assertJsonPath('data.presentation.variant', 'legal_only_redirect');
+            ->assertJsonPath('data.scope.allowed', true)
+            ->assertJsonPath('data.scope.reason', 'llm_scope_check')
+            ->assertJsonPath('data.presentation.variant', 'general_legal_guidance');
 
-        $this->assertStringContainsString('Legal Topics Only', $response->json('data.answer'));
+        $prompt = $provider->chatMessages[1]['content'] ?? '';
+
+        $this->assertStringContainsString('Tell me a joke about coffee.', $prompt);
+        $this->assertStringContainsString('You must decide from the user\'s actual message.', $prompt);
+        $this->assertStringNotContainsString('Legal Topics Only', $response->json('data.answer'));
         $this->assertNotEmpty($response->json('data.follow_up_questions'));
         $this->assertNotEmpty($response->json('data.download.url'));
     }

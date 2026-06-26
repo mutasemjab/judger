@@ -63,14 +63,7 @@ class LegalChatService
         $disclaimer = $this->disclaimerForLanguage($language);
 
         $scope = $this->scopeGuard->allowsConversationMessage($conversation, $message);
-        if (! $scope['allowed']) {
-            return $this->storeRedirectResponse(
-                conversation: $conversation,
-                legalCaseId: $legalCase->id,
-                disclaimer: $disclaimer,
-                language: $language
-            );
-        }
+        $scopeReason = $this->scopeReasonForLlm($scope);
 
         $embedding = AiProviderManager::resolveEmbedding()->embedding($message);
         $caseResults = $this->caseDocumentSearch->searchByEmbedding(
@@ -148,7 +141,7 @@ class LegalChatService
         $experience = $this->experience->buildConversationPayload(
             $conversation,
             $answer,
-            $scope['reason'],
+            $scopeReason,
             $sources,
             $retrieval,
             $language
@@ -204,14 +197,7 @@ class LegalChatService
         $disclaimer = $this->disclaimerForLanguage($language);
 
         $scope = $this->scopeGuard->allowsConversationMessage($conversation, $message);
-        if (! $scope['allowed']) {
-            return $this->storeRedirectResponse(
-                conversation: $conversation,
-                legalCaseId: null,
-                disclaimer: $disclaimer,
-                language: $language
-            );
-        }
+        $scopeReason = $this->scopeReasonForLlm($scope);
 
         $kbResults = $this->knowledgeSearch->search($message, config('ai.max_knowledge_chunks'));
         $retrieval = $this->buildRetrievalMetadata([], $kbResults, false);
@@ -264,7 +250,7 @@ class LegalChatService
         $experience = $this->experience->buildConversationPayload(
             $conversation,
             $answer,
-            $scope['reason'],
+            $scopeReason,
             $sources,
             $retrieval,
             $language
@@ -358,6 +344,13 @@ class LegalChatService
             : (string) config('ai.legal_disclaimer');
     }
 
+    private function scopeReasonForLlm(array $scope): string
+    {
+        return ($scope['allowed'] ?? false)
+            ? (string) ($scope['reason'] ?? 'legal_topic')
+            : 'llm_scope_check';
+    }
+
     private function buildRetrievalMetadata(array $caseResults, array $kbResults, bool $caseChat): array
     {
         return [
@@ -394,6 +387,8 @@ class LegalChatService
                 ."- اكتب الإجابة بالعربية الفصحى الواضحة، إلا إذا طلب المستخدم الإنجليزية صراحة.\n"
                 ."- استخدم Markdown منظم وجذاب بعناوين قصيرة: `## الخلاصة السريعة`، `## ما تقوله المصادر`، `## الخطوات العملية`، و`## ما الذي يجب توضيحه بعد ذلك`.\n"
                 ."- اجعل الفقرات قصيرة وسهلة القراءة، واستخدم النقاط أو الجداول عندما تجعل الإجابة أسرع في الفهم.\n"
+                ."- لا تعتمد على فلترة التطبيق لتحديد النطاق القانوني. أنت من يقرر من النص نفسه هل الطلب قانوني أم لا.\n"
+                ."- إذا كان الطلب غير قانوني فعلا، ارفض بلطف واطلب سؤالا قانونيا بدلا منه. إذا كان السؤال يمكن فهمه كقانوني، أجب عليه.\n"
                 ."- {$sourceRule}\n"
                 ."- اذكر مصدر كل نقطة مأخوذة من المستندات بصيغة [KB_SOURCE_1] أو [CASE_SOURCE_1].\n"
                 ."- إذا لم تظهر مصادر كافية، قل بوضوح إن البحث في قاعدة المعرفة لم يرجع مطابقات قوية.\n"
@@ -410,6 +405,8 @@ class LegalChatService
             ."- Answer in clear, polished English unless the user explicitly asks for Arabic.\n"
             ."- Use attractive, scannable Markdown with these short sections: `## Quick Answer`, `## What The Sources Say`, `## Practical Next Steps`, and `## What To Clarify Next`.\n"
             ."- Keep paragraphs short. Use bullets or compact tables when they make the answer faster to understand.\n"
+            ."- Do not rely on application-side keyword filtering to decide legal scope. You must decide from the user's actual message.\n"
+            ."- If the request is truly non-legal, politely refuse and invite a legal question. If it can reasonably be understood as legal, answer it.\n"
             ."- {$sourceRule}\n"
             ."- Cite every source-based point inline as [KB_SOURCE_1] or [CASE_SOURCE_1].\n"
             ."- If there are not enough source matches, clearly say the knowledge base did not return a strong match before any cautious general orientation.\n"
