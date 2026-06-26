@@ -23,7 +23,9 @@ class LegalChatService
     public function __construct(
         private LegalScopeGuard $scopeGuard,
         private LegalExperienceService $experience,
-        private GeneratedFileExportService $exportService
+        private GeneratedFileExportService $exportService,
+        private KnowledgeSearchService $knowledgeSearch,
+        private CaseDocumentSearchService $caseDocumentSearch
     ) {
     }
 
@@ -57,20 +59,28 @@ class LegalChatService
             throw new RuntimeException('Case not found or access denied.');
         }
 
+        $language = $this->detectLanguage($message);
+        $disclaimer = $this->disclaimerForLanguage($language);
+
         $scope = $this->scopeGuard->allowsConversationMessage($conversation, $message);
         if (! $scope['allowed']) {
             return $this->storeRedirectResponse(
                 conversation: $conversation,
                 legalCaseId: $legalCase->id,
-                disclaimer: config('ai.legal_disclaimer')
+                disclaimer: $disclaimer,
+                language: $language
             );
         }
 
-        $caseSearchService = new CaseDocumentSearchService();
-        $caseResults = $caseSearchService->search($userId, $legalCase->id, $message, config('ai.max_case_document_chunks'));
-
-        $kbSearchService = new KnowledgeSearchService();
-        $kbResults = $kbSearchService->search($message, config('ai.max_knowledge_chunks'));
+        $embedding = AiProviderManager::resolveEmbedding()->embedding($message);
+        $caseResults = $this->caseDocumentSearch->searchByEmbedding(
+            $userId,
+            $legalCase->id,
+            $embedding,
+            config('ai.max_case_document_chunks')
+        );
+        $kbResults = $this->knowledgeSearch->searchByEmbedding($embedding, config('ai.max_knowledge_chunks'));
+        $retrieval = $this->buildRetrievalMetadata($caseResults, $kbResults, true);
 
         $memories = CaseMemory::where('legal_case_id', $legalCase->id)
             ->where('user_id', $userId)
@@ -84,7 +94,9 @@ class LegalChatService
             ->get()
             ->reverse();
 
-        $contextParts = [];
+        $contextParts = [
+            $this->formatRetrievalStatus($retrieval),
+        ];
 
         if (! empty($caseResults)) {
             $contextParts[] = "CASE DOCUMENT SOURCES:\n\n".$this->formatCaseResults($caseResults);
@@ -112,7 +124,7 @@ class LegalChatService
         }
 
         $contextParts[] = "QUESTION:\n{$message}";
-        $contextParts[] = 'Answer using only the provided context. Cite source labels. Include the required legal disclaimer.';
+        $contextParts[] = $this->buildAnswerInstructions($language, true, $disclaimer);
 
         $fullContext = implode("\n\n---\n\n", $contextParts);
 
@@ -122,16 +134,25 @@ class LegalChatService
         $answer = $provider->chat([
             ['role' => 'system', 'content' => $systemPrompt],
             ['role' => 'user', 'content' => $fullContext],
+        ], [
+            'temperature' => (float) config('ai.chat_temperature', 0.25),
+            'max_tokens' => (int) config('ai.chat_max_tokens', 1600),
         ]);
 
-        $disclaimer = config('ai.legal_disclaimer');
         if (! str_contains($answer, $disclaimer)) {
             $answer .= "\n\n".$disclaimer;
         }
 
         $sourceType = $this->determineSourceType($caseResults, $kbResults);
         $sources = $this->buildSources($caseResults, $kbResults);
-        $experience = $this->experience->buildConversationPayload($conversation, $answer, $scope['reason'], $sources);
+        $experience = $this->experience->buildConversationPayload(
+            $conversation,
+            $answer,
+            $scope['reason'],
+            $sources,
+            $retrieval,
+            $language
+        );
 
         $assistantMessage = Message::create([
             'conversation_id' => $conversation->id,
@@ -168,6 +189,7 @@ class LegalChatService
             'next_question_prompt' => $experience['next_question_prompt'],
             'presentation' => $experience['presentation'],
             'scope' => $experience['scope'],
+            'retrieval' => $experience['retrieval'],
             'download' => $this->exportService->publicDownloadData($download),
         ];
     }
@@ -178,17 +200,21 @@ class LegalChatService
             throw new RuntimeException('General conversation must not be linked to a case.');
         }
 
+        $language = $this->detectLanguage($message);
+        $disclaimer = $this->disclaimerForLanguage($language);
+
         $scope = $this->scopeGuard->allowsConversationMessage($conversation, $message);
         if (! $scope['allowed']) {
             return $this->storeRedirectResponse(
                 conversation: $conversation,
                 legalCaseId: null,
-                disclaimer: config('ai.legal_disclaimer')
+                disclaimer: $disclaimer,
+                language: $language
             );
         }
 
-        $kbSearchService = new KnowledgeSearchService();
-        $kbResults = $kbSearchService->search($message, config('ai.max_knowledge_chunks'));
+        $kbResults = $this->knowledgeSearch->search($message, config('ai.max_knowledge_chunks'));
+        $retrieval = $this->buildRetrievalMetadata([], $kbResults, false);
 
         $recentMessages = Message::where('conversation_id', $conversation->id)
             ->whereIn('role', [MessageRole::User->value, MessageRole::Assistant->value])
@@ -197,7 +223,9 @@ class LegalChatService
             ->get()
             ->reverse();
 
-        $contextParts = [];
+        $contextParts = [
+            $this->formatRetrievalStatus($retrieval),
+        ];
 
         if (! empty($kbResults)) {
             $contextParts[] = "KNOWLEDGE BASE SOURCES:\n\n".$this->formatKbResults($kbResults);
@@ -212,7 +240,7 @@ class LegalChatService
         }
 
         $contextParts[] = "QUESTION:\n{$message}";
-        $contextParts[] = 'Answer using only the provided context. Cite source labels. Include the required legal disclaimer.';
+        $contextParts[] = $this->buildAnswerInstructions($language, false, $disclaimer);
 
         $fullContext = implode("\n\n---\n\n", $contextParts);
 
@@ -222,16 +250,25 @@ class LegalChatService
         $answer = $provider->chat([
             ['role' => 'system', 'content' => $systemPrompt],
             ['role' => 'user', 'content' => $fullContext],
+        ], [
+            'temperature' => (float) config('ai.chat_temperature', 0.25),
+            'max_tokens' => (int) config('ai.chat_max_tokens', 1600),
         ]);
 
-        $disclaimer = config('ai.legal_disclaimer');
         if (! str_contains($answer, $disclaimer)) {
             $answer .= "\n\n".$disclaimer;
         }
 
         $sourceType = empty($kbResults) ? MessageSourceType::None : MessageSourceType::KnowledgeBase;
         $sources = $this->buildSources([], $kbResults);
-        $experience = $this->experience->buildConversationPayload($conversation, $answer, $scope['reason'], $sources);
+        $experience = $this->experience->buildConversationPayload(
+            $conversation,
+            $answer,
+            $scope['reason'],
+            $sources,
+            $retrieval,
+            $language
+        );
 
         $assistantMessage = Message::create([
             'conversation_id' => $conversation->id,
@@ -262,13 +299,14 @@ class LegalChatService
             'next_question_prompt' => $experience['next_question_prompt'],
             'presentation' => $experience['presentation'],
             'scope' => $experience['scope'],
+            'retrieval' => $experience['retrieval'],
             'download' => $this->exportService->publicDownloadData($download),
         ];
     }
 
-    private function storeRedirectResponse(Conversation $conversation, ?int $legalCaseId, string $disclaimer): array
+    private function storeRedirectResponse(Conversation $conversation, ?int $legalCaseId, string $disclaimer, string $language): array
     {
-        $experience = $this->experience->buildNonLegalRedirectPayload();
+        $experience = $this->experience->buildNonLegalRedirectPayload($language);
         $answer = $experience['answer'];
 
         if (! str_contains($answer, $disclaimer)) {
@@ -306,6 +344,78 @@ class LegalChatService
             'scope' => $experience['scope'],
             'download' => $this->exportService->publicDownloadData($download),
         ];
+    }
+
+    private function detectLanguage(string $text): string
+    {
+        return preg_match('/[\x{0600}-\x{06FF}]/u', $text) === 1 ? 'ar' : 'en';
+    }
+
+    private function disclaimerForLanguage(string $language): string
+    {
+        return $language === 'ar'
+            ? (string) config('ai.legal_disclaimer_ar')
+            : (string) config('ai.legal_disclaimer');
+    }
+
+    private function buildRetrievalMetadata(array $caseResults, array $kbResults, bool $caseChat): array
+    {
+        return [
+            'strategy' => $caseChat
+                ? 'case_documents_and_knowledge_base_before_llm'
+                : 'knowledge_base_before_llm',
+            'knowledge_base_searched' => true,
+            'knowledge_base_searched_before_llm' => true,
+            'knowledge_base_results_count' => count($kbResults),
+            'case_documents_searched' => $caseChat,
+            'case_document_results_count' => count($caseResults),
+            'llm_context_source' => 'retrieved_context',
+        ];
+    }
+
+    private function formatRetrievalStatus(array $retrieval): string
+    {
+        return "RETRIEVAL STATUS:\n"
+            .'- Knowledge base searched before LLM: '.($retrieval['knowledge_base_searched_before_llm'] ? 'yes' : 'no')."\n"
+            .'- Knowledge base source chunks: '.$retrieval['knowledge_base_results_count']."\n"
+            .'- Case documents searched: '.($retrieval['case_documents_searched'] ? 'yes' : 'no')."\n"
+            .'- Case document source chunks: '.$retrieval['case_document_results_count']."\n"
+            .'- Context rule: use retrieved sources first; if no strong source match is listed, say that clearly before any cautious general orientation.';
+    }
+
+    private function buildAnswerInstructions(string $language, bool $caseChat, string $disclaimer): string
+    {
+        if ($language === 'ar') {
+            $sourceRule = $caseChat
+                ? 'بالنسبة لوقائع القضية، استخدم مصادر مستندات القضية أولا. وبالنسبة للقواعد القانونية العامة، استخدم مصادر قاعدة المعرفة قبل المعرفة العامة للنموذج.'
+                : 'استخدم مصادر قاعدة المعرفة قبل المعرفة العامة للنموذج.';
+
+            return "RESPONSE INSTRUCTIONS:\n"
+                ."- اكتب الإجابة بالعربية الفصحى الواضحة، إلا إذا طلب المستخدم الإنجليزية صراحة.\n"
+                ."- استخدم Markdown منظم وجذاب بعناوين قصيرة: `## الخلاصة السريعة`، `## ما تقوله المصادر`، `## الخطوات العملية`، و`## ما الذي يجب توضيحه بعد ذلك`.\n"
+                ."- اجعل الفقرات قصيرة وسهلة القراءة، واستخدم النقاط أو الجداول عندما تجعل الإجابة أسرع في الفهم.\n"
+                ."- {$sourceRule}\n"
+                ."- اذكر مصدر كل نقطة مأخوذة من المستندات بصيغة [KB_SOURCE_1] أو [CASE_SOURCE_1].\n"
+                ."- إذا لم تظهر مصادر كافية، قل بوضوح إن البحث في قاعدة المعرفة لم يرجع مطابقات قوية.\n"
+                ."- لا تخترع قوانين أو مواعيد أو وقائع قضية غير موجودة في السياق.\n"
+                ."- اختم بسؤال متابعة قانوني واحد يساعد المستخدم على المتابعة.\n"
+                ."- Include this disclaimer exactly: {$disclaimer}";
+        }
+
+        $sourceRule = $caseChat
+            ? 'For case-specific facts, use case document sources first. For general legal rules, use knowledge base sources before model background knowledge.'
+            : 'Use knowledge base sources before model background knowledge.';
+
+        return "RESPONSE INSTRUCTIONS:\n"
+            ."- Answer in clear, polished English unless the user explicitly asks for Arabic.\n"
+            ."- Use attractive, scannable Markdown with these short sections: `## Quick Answer`, `## What The Sources Say`, `## Practical Next Steps`, and `## What To Clarify Next`.\n"
+            ."- Keep paragraphs short. Use bullets or compact tables when they make the answer faster to understand.\n"
+            ."- {$sourceRule}\n"
+            ."- Cite every source-based point inline as [KB_SOURCE_1] or [CASE_SOURCE_1].\n"
+            ."- If there are not enough source matches, clearly say the knowledge base did not return a strong match before any cautious general orientation.\n"
+            ."- Do not invent laws, deadlines, citations, or case facts.\n"
+            ."- End with one useful legal follow-up question.\n"
+            ."- Include this disclaimer exactly: {$disclaimer}";
     }
 
     private function claimAttachments(Conversation $conversation, Message $message, int $userId, array $attachmentIds)

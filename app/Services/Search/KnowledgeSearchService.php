@@ -9,11 +9,20 @@ class KnowledgeSearchService
 {
     public function search(string $question, ?int $limit = null): array
     {
-        $limit = $limit ?? config('ai.max_knowledge_chunks', 8);
-        $threshold = config('ai.document_similarity_threshold', 0.70);
-
         $provider = AiProviderManager::resolveEmbedding();
         $embedding = $provider->embedding($question);
+
+        return $this->searchByEmbedding($embedding, $limit);
+    }
+
+    public function searchByEmbedding(array $embedding, ?int $limit = null): array
+    {
+        if ($embedding === []) {
+            return [];
+        }
+
+        $limit = $limit ?? config('ai.max_knowledge_chunks', 8);
+        $threshold = config('ai.document_similarity_threshold', 0.70);
 
         $vectorStore = app(VectorStoreInterface::class);
         $collectionName = config('ai.qdrant_knowledge_collection');

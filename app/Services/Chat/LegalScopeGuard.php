@@ -47,6 +47,9 @@ class LegalScopeGuard
         return (bool) preg_match(
             '/\b(legal|illegal|lawful|rights?|obligations?|liable|lawsuit|court|judge|contract|agreement|notice|appeal|evidence|deadline|compliance|regulation|policy|claim|damages?)\b/u',
             $normalized
+        ) || (bool) preg_match(
+            '/(قانون|قانوني|محام|محكمة|قضية|دعوى|عقد|اتفاقية|إنذار|إشعار|استئناف|دليل|أدلة|مهلة|اختصاص|امتثال|تعويض|غرامة|حقوق|التزامات|شكوى)/u',
+            $normalized
         );
     }
 
@@ -72,6 +75,12 @@ class LegalScopeGuard
             $normalized
         ) || (bool) preg_match(
             '/^(what|how|why|when)\b.*\b(this|that|it|case|document|contract|notice|letter|memo|deadline|risk)\b/u',
+            $normalized
+        ) || (bool) preg_match(
+            '/(هذا|هذه|ذلك|تلك|القضية|المستند|العقد|الإنذار|المذكرة|المهلة).*(يعني|يغير|يساعد|يؤثر|خطر|مخاطر|موعد|إجراء|أفعل|أعمل)/u',
+            $normalized
+        ) || (bool) preg_match(
+            '/^(هل يمكنك|ممكن|من فضلك|اشرح|بسط|اختصر|أعد|اكتب|لخص|حوّل|تابع)/u',
             $normalized
         );
     }

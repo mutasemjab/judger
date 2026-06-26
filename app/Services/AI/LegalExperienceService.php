@@ -8,23 +8,38 @@ use Illuminate\Support\Arr;
 
 class LegalExperienceService
 {
-    public function buildConversationPayload(Conversation $conversation, string $answer, string $scopeReason, array $sources = []): array
+    public function buildConversationPayload(
+        Conversation $conversation,
+        string $answer,
+        string $scopeReason,
+        array $sources = [],
+        array $retrieval = [],
+        string $language = 'en'
+    ): array
     {
+        $language = $this->normalizeLanguage($language);
+
         return [
-            'answer' => $this->normalizeMarkdown($answer, $conversation->isCase() ? 'Case Guidance' : 'Legal Guidance'),
-            'follow_up_questions' => $this->conversationFollowUps($conversation, $sources),
-            'next_question_prompt' => 'Ask the next legal question anytime, and I will continue from here.',
+            'answer' => $this->normalizeMarkdown($answer, $this->conversationFallbackTitle($conversation, $language)),
+            'follow_up_questions' => $this->conversationFollowUps($conversation, $sources, $language),
+            'next_question_prompt' => $language === 'ar'
+                ? 'اسأل سؤالك القانوني التالي في أي وقت، وسأتابع من نفس السياق.'
+                : 'Ask the next legal question anytime, and I will continue from here.',
             'presentation' => [
                 'format' => 'markdown',
                 'style' => 'judger_pro',
                 'variant' => $conversation->isCase() ? 'case_guidance' : 'general_legal_guidance',
+                'language' => $language,
+                'direction' => $language === 'ar' ? 'rtl' : 'ltr',
                 'show_sources' => ! empty($sources),
                 'show_disclaimer' => true,
+                'retrieval' => $retrieval,
             ],
             'scope' => [
                 'allowed' => true,
                 'reason' => $scopeReason,
             ],
+            'retrieval' => $retrieval,
         ];
     }
 
@@ -54,20 +69,35 @@ class LegalExperienceService
         ];
     }
 
-    public function buildNonLegalRedirectPayload(): array
+    public function buildNonLegalRedirectPayload(string $language = 'en'): array
     {
+        $language = $this->normalizeLanguage($language);
+        $message = $language === 'ar'
+            ? config('ai.non_legal_redirect_message_ar')
+            : config('ai.non_legal_redirect_message');
+
         return [
-            'answer' => $this->normalizeMarkdown(config('ai.non_legal_redirect_message'), 'Legal Topics Only'),
-            'follow_up_questions' => [
-                'Can you review a contract, notice, or court document for me?',
-                'Can you explain a legal deadline, risk, or procedure?',
-                'Can you draft a legal memo, notice, demand letter, or checklist?',
-            ],
-            'next_question_prompt' => 'Rephrase your request as a legal question, and I will continue right away.',
+            'answer' => $this->normalizeMarkdown($message, $language === 'ar' ? 'الموضوعات القانونية فقط' : 'Legal Topics Only'),
+            'follow_up_questions' => $language === 'ar'
+                ? [
+                    'هل يمكنك مراجعة عقد أو إنذار أو مستند محكمة؟',
+                    'هل يمكنك شرح مهلة قانونية أو خطر أو إجراء؟',
+                    'هل يمكنك صياغة مذكرة قانونية أو إنذار أو خطاب مطالبة أو قائمة تحقق؟',
+                ]
+                : [
+                    'Can you review a contract, notice, or court document for me?',
+                    'Can you explain a legal deadline, risk, or procedure?',
+                    'Can you draft a legal memo, notice, demand letter, or checklist?',
+                ],
+            'next_question_prompt' => $language === 'ar'
+                ? 'أعد صياغة طلبك كسؤال قانوني، وسأتابع مباشرة.'
+                : 'Rephrase your request as a legal question, and I will continue right away.',
             'presentation' => [
                 'format' => 'markdown',
                 'style' => 'judger_pro',
                 'variant' => 'legal_only_redirect',
+                'language' => $language,
+                'direction' => $language === 'ar' ? 'rtl' : 'ltr',
                 'show_sources' => false,
                 'show_disclaimer' => true,
             ],
@@ -85,6 +115,7 @@ class LegalExperienceService
             'next_question_prompt',
             'presentation',
             'scope',
+            'retrieval',
         ]);
 
         if ($download !== null) {
@@ -94,9 +125,17 @@ class LegalExperienceService
         return $metadata;
     }
 
-    private function conversationFollowUps(Conversation $conversation, array $sources): array
+    private function conversationFollowUps(Conversation $conversation, array $sources, string $language): array
     {
         if ($conversation->isCase()) {
+            if ($language === 'ar') {
+                return [
+                    'ما المهلة أو الخطر أو الجلسة التي يجب متابعتها بعد ذلك؟',
+                    'ما الدليل أو المستند الذي لا يزال ناقصا في هذه القضية؟',
+                    'هل يمكنك تحويل ذلك إلى مذكرة أو جدول زمني أو قائمة تحقق؟',
+                ];
+            }
+
             return [
                 'What deadline, risk, or hearing should I track next?',
                 'What evidence or document is still missing in this case?',
@@ -105,10 +144,26 @@ class LegalExperienceService
         }
 
         if (! empty($sources)) {
+            if ($language === 'ar') {
+                return [
+                    'هل يمكنك تبسيط ذلك بلغة أوضح؟',
+                    'ما الوقائع التي قد تغير هذه الإجابة القانونية؟',
+                    'ما السؤال التالي الذي يجب طرحه على محام بخصوص هذه المسألة؟',
+                ];
+            }
+
             return [
                 'Can you simplify this in plain language?',
                 'What facts could change this legal answer?',
                 'What should I ask a lawyer next about this issue?',
+            ];
+        }
+
+        if ($language === 'ar') {
+            return [
+                'هل يمكنك شرح ذلك بمثال عملي؟',
+                'ما الوقائع التي تحتاجها مني لجعل الإجابة أكثر تحديدا؟',
+                'ما السؤال التالي الذي يجب طرحه على محام بخصوص هذه المسألة؟',
             ];
         }
 
@@ -153,5 +208,19 @@ class LegalExperienceService
         }
 
         return "## {$fallbackTitle}\n\n{$trimmed}";
+    }
+
+    private function conversationFallbackTitle(Conversation $conversation, string $language): string
+    {
+        if ($language === 'ar') {
+            return $conversation->isCase() ? 'إرشاد القضية' : 'إرشاد قانوني';
+        }
+
+        return $conversation->isCase() ? 'Case Guidance' : 'Legal Guidance';
+    }
+
+    private function normalizeLanguage(string $language): string
+    {
+        return $language === 'ar' ? 'ar' : 'en';
     }
 }

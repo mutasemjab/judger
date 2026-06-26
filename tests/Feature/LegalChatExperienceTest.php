@@ -6,6 +6,9 @@ use App\Enums\MessageRole;
 use App\Models\Conversation;
 use App\Models\Message;
 use App\Models\User;
+use App\Services\AI\Contracts\LlmProviderInterface;
+use App\Services\AI\Providers\MockLlmProvider;
+use App\Services\Vector\Contracts\VectorStoreInterface;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
@@ -82,6 +85,119 @@ class LegalChatExperienceTest extends TestCase
         $downloadResponse = $this->apiAs($user)->get($downloadUrl);
         $downloadResponse->assertOk();
         $this->assertStringContainsString('.md', $downloadResponse->headers->get('content-disposition', ''));
+    }
+
+    public function test_chat_supports_arabic_legal_questions_with_rtl_metadata(): void
+    {
+        $user = User::factory()->create();
+        $conversation = Conversation::factory()->create([
+            'user_id' => $user->id,
+            'title' => 'استشارة قانونية',
+        ]);
+
+        $response = $this->apiAs($user)->postJson("/api/v1/conversations/{$conversation->id}/chat", [
+            'message' => 'ما هي حقوقي القانونية في عقد الإيجار؟',
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('data.scope.allowed', true)
+            ->assertJsonPath('data.scope.reason', 'legal_topic')
+            ->assertJsonPath('data.presentation.language', 'ar')
+            ->assertJsonPath('data.presentation.direction', 'rtl')
+            ->assertJsonPath('data.disclaimer', config('ai.legal_disclaimer_ar'));
+
+        $this->assertStringContainsString('إرشاد قانوني', $response->json('data.answer'));
+        $this->assertStringContainsString('محام', $response->json('data.follow_up_questions.2'));
+    }
+
+    public function test_chat_sends_knowledge_base_output_to_llm_before_answering(): void
+    {
+        $user = User::factory()->create();
+        $conversation = Conversation::factory()->create([
+            'user_id' => $user->id,
+            'title' => 'Lease Notice',
+        ]);
+
+        $provider = new class implements LlmProviderInterface {
+            public array $chatMessages = [];
+
+            public function chat(array $messages, array $options = []): string
+            {
+                $this->chatMessages = $messages;
+
+                return "## Quick Answer\n\nUse a written notice before termination. [KB_SOURCE_1]";
+            }
+
+            public function chatJson(array $messages, array $schema = [], array $options = []): array
+            {
+                return [];
+            }
+
+            public function embedding(string $text): array
+            {
+                return [1.0, 0.0];
+            }
+
+            public function embeddingMany(array $texts): array
+            {
+                return array_fill(0, count($texts), [1.0, 0.0]);
+            }
+        };
+
+        $this->app->instance(MockLlmProvider::class, $provider);
+        $this->app->instance(VectorStoreInterface::class, new class implements VectorStoreInterface {
+            public function ensureCollection(string $collectionName, int $vectorSize): void
+            {
+            }
+
+            public function upsertPoint(string $collectionName, string|int $id, array $vector, array $payload): void
+            {
+            }
+
+            public function search(string $collectionName, array $vector, int $limit = 10, array $filter = []): array
+            {
+                if ($collectionName !== config('ai.qdrant_knowledge_collection')) {
+                    return [];
+                }
+
+                return [[
+                    'id' => 'kb-lease-1',
+                    'score' => 0.95,
+                    'payload' => [
+                        'source_type' => 'knowledge_base',
+                        'knowledge_document_id' => 10,
+                        'chunk_index' => 2,
+                        'document_name' => 'Lease Notice Guide.pdf',
+                        'category' => 'leases',
+                        'page_number' => 4,
+                        'content' => 'A lease termination should be supported by a clear written notice period.',
+                        'snippet' => 'clear written notice period',
+                        'status' => 'processed',
+                    ],
+                ]];
+            }
+
+            public function deleteByFilter(string $collectionName, array $filter): void
+            {
+            }
+        });
+
+        $response = $this->apiAs($user)->postJson("/api/v1/conversations/{$conversation->id}/chat", [
+            'message' => 'What legal notice is required for lease termination?',
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('data.source_type', 'knowledge_base')
+            ->assertJsonPath('data.sources.0.source_label', 'KB_SOURCE_1')
+            ->assertJsonPath('data.retrieval.knowledge_base_searched_before_llm', true)
+            ->assertJsonPath('data.retrieval.knowledge_base_results_count', 1);
+
+        $prompt = $provider->chatMessages[1]['content'] ?? '';
+
+        $this->assertStringContainsString('RETRIEVAL STATUS', $prompt);
+        $this->assertStringContainsString('Knowledge base searched before LLM: yes', $prompt);
+        $this->assertStringContainsString('[KB_SOURCE_1]', $prompt);
+        $this->assertStringContainsString('A lease termination should be supported by a clear written notice period.', $prompt);
     }
 
     private function apiAs(User $user): self
