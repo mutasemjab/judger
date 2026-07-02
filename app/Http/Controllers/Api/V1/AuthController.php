@@ -2,10 +2,13 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Enums\UserType;
 use App\Http\Requests\Api\V1\LoginRequest;
 use App\Http\Requests\Api\V1\RegisterRequest;
+use App\Http\Requests\Api\V1\SocialLoginRequest;
 use App\Http\Resources\Api\V1\UserResource;
 use App\Models\User;
+use App\Services\Auth\SocialIdentityVerifier;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Auth\Events\PasswordReset;
 use Illuminate\Http\Request;
@@ -18,6 +21,10 @@ class AuthController extends BaseApiController
 {
     public function register(RegisterRequest $request): JsonResponse
     {
+        if ($response = $this->emailPasswordAuthDisabledResponse()) {
+            return $response;
+        }
+
         $user = User::create([
             'name' => $request->name,
             'email' => $request->email,
@@ -26,20 +33,7 @@ class AuthController extends BaseApiController
             'phone' => $request->phone,
         ]);
 
-        $freePlan = \App\Models\SubscriptionPlan::where('name', 'free')->first();
-        if ($freePlan) {
-            \App\Models\UserSubscription::create([
-                'user_id' => $user->id,
-                'subscription_plan_id' => $freePlan->id,
-                'status' => 'active',
-                'starts_at' => now(),
-            ]);
-        }
-
-        $userRole = \App\Models\Role::where('slug', 'user')->first();
-        if ($userRole) {
-            $user->roles()->attach($userRole->id);
-        }
+        $this->bootstrapNewUser($user);
 
         $token = JWTAuth::fromUser($user);
 
@@ -52,6 +46,10 @@ class AuthController extends BaseApiController
 
     public function login(LoginRequest $request): JsonResponse
     {
+        if ($response = $this->emailPasswordAuthDisabledResponse()) {
+            return $response;
+        }
+
         $credentials = $request->only('email', 'password');
 
         if (!$token = auth('api')->attempt($credentials)) {
@@ -73,6 +71,86 @@ class AuthController extends BaseApiController
             'token_type' => 'Bearer',
             'expires_in' => config('jwt.ttl') * 60,
         ], 'Login successful.');
+    }
+
+    public function socialLogin(SocialLoginRequest $request, SocialIdentityVerifier $verifier): JsonResponse
+    {
+        try {
+            $identity = $verifier->verify($request->provider, $request->id_token);
+        } catch (\Throwable $exception) {
+            return $this->error($exception->getMessage(), 422);
+        }
+
+        $providerColumn = $identity['provider'] . '_id';
+        $user = User::query()
+            ->where($providerColumn, $identity['provider_id'])
+            ->first();
+
+        if (! $user && $identity['email']) {
+            $user = User::query()->where('email', $identity['email'])->first();
+        }
+
+        if ($user && $user->{$providerColumn} && $user->{$providerColumn} !== $identity['provider_id']) {
+            return $this->error('This email is already linked to a different social account.', 409);
+        }
+
+        $isNewUser = false;
+
+        if (! $user) {
+            if (! $identity['email']) {
+                return $this->error('The social account did not provide an email address.', 422);
+            }
+
+            $user = User::create([
+                'name' => $this->socialName($identity, $request->name),
+                'email' => $identity['email'],
+                'password' => Hash::make(Str::random(64)),
+                'user_type' => $request->user_type ?: UserType::Individual->value,
+                'phone' => $request->phone,
+                'avatar' => $identity['avatar'],
+                'email_verified_at' => $identity['email_verified'] ? now() : null,
+                'auth_provider' => $identity['provider'],
+                $providerColumn => $identity['provider_id'],
+            ]);
+
+            $this->bootstrapNewUser($user);
+            $isNewUser = true;
+        } else {
+            $updates = [
+                'auth_provider' => $identity['provider'],
+                $providerColumn => $identity['provider_id'],
+            ];
+
+            if (! $user->email_verified_at && $identity['email_verified']) {
+                $updates['email_verified_at'] = now();
+            }
+
+            if (! $user->avatar && $identity['avatar']) {
+                $updates['avatar'] = $identity['avatar'];
+            }
+
+            if ((! $user->name || str_starts_with($user->name, 'Apple User')) && $request->name) {
+                $updates['name'] = $request->name;
+            }
+
+            $user->forceFill($updates)->save();
+        }
+
+        if (! $user->fresh()->isActive()) {
+            return $this->error('Your account is ' . $user->fresh()->account_status->value . '.', 403);
+        }
+
+        $user->forceFill(['last_login_at' => now()])->save();
+        $token = JWTAuth::fromUser($user->fresh());
+
+        return $this->success([
+            'user' => new UserResource($user->fresh()),
+            'token' => $token,
+            'token_type' => 'Bearer',
+            'expires_in' => config('jwt.ttl') * 60,
+            'provider' => $identity['provider'],
+            'is_new_user' => $isNewUser,
+        ], $isNewUser ? 'Account created with social login.' : 'Login successful.');
     }
 
     public function logout(): JsonResponse
@@ -119,6 +197,10 @@ class AuthController extends BaseApiController
 
     public function changePassword(Request $request): JsonResponse
     {
+        if ($response = $this->emailPasswordAuthDisabledResponse()) {
+            return $response;
+        }
+
         $request->validate([
             'current_password' => 'required|string',
             'password' => 'required|string|min:8|confirmed',
@@ -137,6 +219,10 @@ class AuthController extends BaseApiController
 
     public function forgotPassword(Request $request): JsonResponse
     {
+        if ($response = $this->emailPasswordAuthDisabledResponse()) {
+            return $response;
+        }
+
         $request->validate(['email' => 'required|email']);
 
         $status = Password::broker()->sendResetLink(
@@ -152,6 +238,10 @@ class AuthController extends BaseApiController
 
     public function resetPassword(Request $request): JsonResponse
     {
+        if ($response = $this->emailPasswordAuthDisabledResponse()) {
+            return $response;
+        }
+
         $request->validate([
             'token' => 'required',
             'email' => 'required|email',
@@ -175,5 +265,48 @@ class AuthController extends BaseApiController
         }
 
         return $this->success(null, 'Password reset successful.');
+    }
+
+    private function bootstrapNewUser(User $user): void
+    {
+        $freePlan = \App\Models\SubscriptionPlan::where('name', 'free')->first();
+        if ($freePlan) {
+            \App\Models\UserSubscription::firstOrCreate([
+                'user_id' => $user->id,
+                'subscription_plan_id' => $freePlan->id,
+            ], [
+                'status' => 'active',
+                'starts_at' => now(),
+            ]);
+        }
+
+        $userRole = \App\Models\Role::where('slug', 'user')->first();
+        if ($userRole && ! $user->roles()->whereKey($userRole->id)->exists()) {
+            $user->roles()->attach($userRole->id);
+        }
+    }
+
+    private function socialName(array $identity, ?string $requestName): string
+    {
+        $name = trim((string) ($identity['name'] ?: $requestName));
+
+        if ($name !== '') {
+            return $name;
+        }
+
+        if ($identity['email']) {
+            return Str::of($identity['email'])->before('@')->replace(['.', '_', '-'], ' ')->title()->toString();
+        }
+
+        return $identity['provider'] === 'apple' ? 'Apple User' : 'Social User';
+    }
+
+    private function emailPasswordAuthDisabledResponse(): ?JsonResponse
+    {
+        if (config('social_auth.email_password_enabled')) {
+            return null;
+        }
+
+        return $this->error('Email/password authentication is disabled. Use Google or Apple social login.', 410);
     }
 }
