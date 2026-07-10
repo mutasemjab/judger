@@ -136,9 +136,7 @@ class LegalChatService
             'max_tokens' => (int) config('ai.chat_max_tokens', 1600),
         ]);
 
-        if (! str_contains($answer, $disclaimer)) {
-            $answer .= "\n\n".$disclaimer;
-        }
+        $answer = $this->removeDisclaimerFromAnswer($answer, $disclaimer);
 
         $sourceType = $this->determineSourceType($caseResults, $kbResults);
         $sources = $this->buildSources($caseResults, $kbResults);
@@ -252,9 +250,7 @@ class LegalChatService
             'max_tokens' => (int) config('ai.chat_max_tokens', 1600),
         ]);
 
-        if (! str_contains($answer, $disclaimer)) {
-            $answer .= "\n\n".$disclaimer;
-        }
+        $answer = $this->removeDisclaimerFromAnswer($answer, $disclaimer);
 
         $sourceType = empty($kbResults) ? MessageSourceType::None : MessageSourceType::KnowledgeBase;
         $sources = $this->buildSources([], $kbResults);
@@ -309,9 +305,7 @@ class LegalChatService
         $experience = $this->experience->buildNonLegalRedirectPayload($language);
         $answer = $experience['answer'];
 
-        if (! str_contains($answer, $disclaimer)) {
-            $answer .= "\n\n".$disclaimer;
-        }
+        $answer = $this->removeDisclaimerFromAnswer($answer, $disclaimer);
 
         $assistantMessage = Message::create([
             'conversation_id' => $conversation->id,
@@ -413,7 +407,7 @@ class LegalChatService
                 ."- إذا طلب المستخدم إنشاء ملف أو تنزيل مذكرة أو إنذار أو خطاب أو قائمة تحقق أو جدول زمني، اكتب المحتوى كاملا بصيغة جاهزة للتصدير ولا تقل إنك لا تستطيع إنشاء ملف؛ سيضيف النظام ملف Word قابل للتنزيل.\n"
                 ."- إذا كانت بعض البيانات ناقصة في المستند، استخدم خانات واضحة مثل [اسم الطرف] أو [التاريخ] بدلا من إيقاف الإجابة بالكامل.\n"
                 ."- اختم بسؤال متابعة قانوني واحد يساعد المستخدم على المتابعة.\n"
-                ."- Include this disclaimer exactly: {$disclaimer}";
+                ."- لا تضع نص إخلاء المسؤولية داخل الإجابة نفسها؛ سيعرض التطبيق هذا النص مرة واحدة في حقل مستقل: {$disclaimer}";
         }
 
         $sourceRule = $caseChat
@@ -433,7 +427,15 @@ class LegalChatService
             ."- If the user asks to create a file or download a memo, notice, letter, checklist, or timeline, write the complete export-ready content and do not say you cannot create a file; the application will attach a downloadable Word document.\n"
             ."- If details are missing from a document, use clear placeholders such as [party name] or [date] instead of stopping the answer entirely.\n"
             ."- End with one useful legal follow-up question.\n"
-            ."- Include this disclaimer exactly: {$disclaimer}";
+            ."- Do not include the disclaimer inside the answer body; the application will display it once from this separate field: {$disclaimer}";
+    }
+
+    private function removeDisclaimerFromAnswer(string $answer, string $disclaimer): string
+    {
+        $cleaned = trim(str_replace($disclaimer, '', $answer));
+        $cleaned = preg_replace("/(\R\s*){3,}/u", "\n\n", $cleaned) ?? $cleaned;
+
+        return trim($cleaned);
     }
 
     private function claimAttachments(Conversation $conversation, Message $message, int $userId, array $attachmentIds)

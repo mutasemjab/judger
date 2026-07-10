@@ -117,6 +117,7 @@ class LegalChatExperienceTest extends TestCase
         $downloadResponse = $this->apiAs($user)->get($downloadUrl);
         $downloadResponse->assertOk();
         $this->assertStringContainsString('.docx', $downloadResponse->headers->get('content-disposition', ''));
+        $this->assertStringNotContainsString(config('ai.legal_disclaimer'), $response->json('data.answer'));
     }
 
     public function test_chat_supports_arabic_legal_questions_with_rtl_metadata(): void
@@ -140,6 +141,7 @@ class LegalChatExperienceTest extends TestCase
             ->assertJsonPath('data.disclaimer', config('ai.legal_disclaimer_ar'));
 
         $this->assertStringContainsString('إرشاد قانوني', $response->json('data.answer'));
+        $this->assertStringNotContainsString(config('ai.legal_disclaimer_ar'), $response->json('data.answer'));
         $this->assertTrue(collect($response->json('data.follow_up_questions'))->contains(fn ($question) => str_contains($question, 'محام')));
     }
 

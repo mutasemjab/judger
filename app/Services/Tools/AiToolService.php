@@ -33,9 +33,7 @@ class AiToolService
             ['role' => 'user', 'content' => $prompt],
         ]);
 
-        if (!str_contains($answer, $this->disclaimer)) {
-            $answer .= "\n\n" . $this->disclaimer;
-        }
+        $answer = $this->removeDisclaimerFromAnswer($answer);
 
         $experience = $this->experience->buildToolPayload($toolType, $answer, $context['sources']);
 
@@ -180,5 +178,13 @@ class AiToolService
     private function detectLanguage(string $text): string
     {
         return preg_match('/[\x{0600}-\x{06FF}]/u', $text) === 1 ? 'ar' : 'en';
+    }
+
+    private function removeDisclaimerFromAnswer(string $answer): string
+    {
+        $cleaned = trim(str_replace($this->disclaimer, '', $answer));
+        $cleaned = preg_replace("/(\R\s*){3,}/u", "\n\n", $cleaned) ?? $cleaned;
+
+        return trim($cleaned);
     }
 }

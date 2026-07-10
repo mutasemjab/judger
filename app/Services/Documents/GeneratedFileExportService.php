@@ -25,7 +25,7 @@ class GeneratedFileExportService
         $download = $this->storeWordDocument(
             directory: "generated/chat_messages/user_{$message->conversation->user_id}",
             title: $message->conversation->title ?: 'judger-ai-response',
-            content: $message->content,
+            content: $this->contentWithDisclaimer($message->content, $message->disclaimer),
             url: "/api/v1/messages/{$message->id}/download"
         );
 
@@ -46,7 +46,7 @@ class GeneratedFileExportService
         $download = $this->storeWordDocument(
             directory: "generated/ai_tools/user_{$output->user_id}",
             title: $output->tool_type?->label() ?? 'judger-ai-output',
-            content: $output->content ?? '',
+            content: $this->contentWithDisclaimer($output->content ?? '', $output->disclaimer),
             url: "/api/v1/ai-tools/{$output->id}/download"
         );
 
@@ -75,7 +75,7 @@ class GeneratedFileExportService
         $download = $this->storeWordDocument(
             directory: "generated/template_documents/user_{$document->user_id}",
             title: $document->title ?: 'generated-document',
-            content: $document->content,
+            content: $this->contentWithDisclaimer($document->content, $document->disclaimer),
             url: "/api/v1/generated-documents/{$document->id}/download"
         );
 
@@ -226,6 +226,18 @@ class GeneratedFileExportService
         }
 
         return '# ' . $title . "\n\n" . $trimmed . "\n";
+    }
+
+    private function contentWithDisclaimer(string $content, ?string $disclaimer): string
+    {
+        $content = trim($content);
+        $disclaimer = trim((string) $disclaimer);
+
+        if ($disclaimer === '' || str_contains($content, $disclaimer)) {
+            return $content;
+        }
+
+        return $content . "\n\n---\n\n" . $disclaimer;
     }
 
     private function stripInlineMarkdown(string $text): string

@@ -42,6 +42,7 @@ class GeneratedOutputDownloadTest extends TestCase
         $downloadResponse = $this->apiAs($user)->get($downloadUrl);
         $downloadResponse->assertOk();
         $this->assertStringContainsString('.docx', $downloadResponse->headers->get('content-disposition', ''));
+        $this->assertStringNotContainsString(config('ai.legal_disclaimer'), $response->json('data.content'));
     }
 
     public function test_generated_template_document_includes_downloadable_file(): void
