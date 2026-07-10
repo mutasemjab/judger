@@ -32,14 +32,16 @@ class GeneratedOutputDownloadTest extends TestCase
 
         $response->assertOk()
             ->assertJsonPath('data.presentation.variant', 'generated_legal_document')
-            ->assertJsonPath('data.download.available', true);
+            ->assertJsonPath('data.download.available', true)
+            ->assertJsonPath('data.download.format', 'docx')
+            ->assertJsonPath('data.actions.0.id', 'download_docx');
 
         $downloadUrl = $response->json('data.download.url');
         $this->assertNotEmpty($downloadUrl);
 
         $downloadResponse = $this->apiAs($user)->get($downloadUrl);
         $downloadResponse->assertOk();
-        $this->assertStringContainsString('.md', $downloadResponse->headers->get('content-disposition', ''));
+        $this->assertStringContainsString('.docx', $downloadResponse->headers->get('content-disposition', ''));
     }
 
     public function test_generated_template_document_includes_downloadable_file(): void
@@ -68,14 +70,16 @@ class GeneratedOutputDownloadTest extends TestCase
         ]);
 
         $response->assertCreated()
-            ->assertJsonPath('data.download.available', true);
+            ->assertJsonPath('data.download.available', true)
+            ->assertJsonPath('data.download.format', 'docx')
+            ->assertJsonPath('data.actions.0.id', 'download_docx');
 
         $downloadUrl = $response->json('data.download.url');
         $this->assertNotEmpty($downloadUrl);
 
         $downloadResponse = $this->apiAs($user)->get($downloadUrl);
         $downloadResponse->assertOk();
-        $this->assertStringContainsString('.md', $downloadResponse->headers->get('content-disposition', ''));
+        $this->assertStringContainsString('.docx', $downloadResponse->headers->get('content-disposition', ''));
     }
 
     private function apiAs(User $user): self

@@ -59,6 +59,10 @@ class AiToolService
         ]);
 
         $download = $this->exportService->exportAiToolOutput($output);
+        $outputPayload = $output->output ?? [];
+        $outputPayload['download'] = $download;
+        $outputPayload['actions'] = $this->experience->actionsForPayload($experience, $download);
+        $output->forceFill(['output' => $outputPayload])->save();
 
         return [
             'id' => $output->id,
@@ -72,6 +76,8 @@ class AiToolService
             'presentation' => $experience['presentation'],
             'scope' => $experience['scope'],
             'download' => $this->exportService->publicDownloadData($download),
+            'download_url' => $download['url'] ?? null,
+            'actions' => $outputPayload['actions'],
         ];
     }
 
@@ -130,6 +136,16 @@ class AiToolService
         $contextBlock = $context ? "CONTEXT:\n{$context}\n\n" : '';
 
         $inputText = $input['text'] ?? $input['query'] ?? '';
+        $language = $this->detectLanguage($inputText . ' ' . ($input['additional_info'] ?? ''));
+        $languageInstruction = $language === 'ar'
+            ? 'Write in clear Arabic unless the user explicitly requested another language.'
+            : 'Write in clear English unless the user explicitly requested another language.';
+        $outputRequirements = "OUTPUT REQUIREMENTS:\n"
+            ."- {$languageInstruction}\n"
+            ."- Produce complete, polished, export-ready content for {$label}.\n"
+            ."- If the user asks for a file, download, export, memo, letter, notice, checklist, or timeline, write the full document body directly. Do not say you cannot create a file; the API will attach a downloadable Word document.\n"
+            ."- If facts are missing, use clear placeholders and a short assumptions section instead of stopping at a generic clarification request.\n"
+            ."- Use compact Markdown sections, bullets, or tables where they improve readability.\n\n";
         $caseDetails = '';
 
         if (!empty($input['additional_info'])) {
@@ -137,27 +153,32 @@ class AiToolService
         }
 
         return match ($toolType) {
-            AiToolType::CaseSummarizer => "{$contextBlock}Summarize this legal case clearly and concisely:\n{$inputText}\n{$caseDetails}\nProvide a structured summary with key facts, parties, issues, and current status.",
+            AiToolType::CaseSummarizer => "{$contextBlock}{$outputRequirements}Summarize this legal case clearly and concisely:\n{$inputText}\n{$caseDetails}\nProvide a structured summary with key facts, parties, issues, and current status.",
 
-            AiToolType::DocumentSummarizer => "{$contextBlock}Summarize this legal document:\n{$inputText}\nProvide: 1) Main purpose 2) Key provisions 3) Important dates/deadlines 4) Parties involved 5) Potential issues.",
+            AiToolType::DocumentSummarizer => "{$contextBlock}{$outputRequirements}Summarize this legal document:\n{$inputText}\nProvide: 1) Main purpose 2) Key provisions 3) Important dates/deadlines 4) Parties involved 5) Potential issues.",
 
-            AiToolType::ContractAnalyzer => "{$contextBlock}Analyze this contract:\n{$inputText}\nProvide: 1) Contract type 2) Key obligations 3) Rights and duties 4) Risk clauses 5) Unusual or concerning provisions 6) Missing standard clauses.",
+            AiToolType::ContractAnalyzer => "{$contextBlock}{$outputRequirements}Analyze this contract:\n{$inputText}\nProvide: 1) Contract type 2) Key obligations 3) Rights and duties 4) Risk clauses 5) Unusual or concerning provisions 6) Missing standard clauses.",
 
-            AiToolType::RiskEstimator => "{$contextBlock}Estimate legal risks for:\n{$inputText}\n{$caseDetails}\nProvide: 1) Identified risks (High/Medium/Low) 2) Potential consequences 3) Risk mitigation suggestions. Note jurisdiction-specific variations may apply.",
+            AiToolType::RiskEstimator => "{$contextBlock}{$outputRequirements}Estimate legal risks for:\n{$inputText}\n{$caseDetails}\nProvide: 1) Identified risks (High/Medium/Low) 2) Potential consequences 3) Risk mitigation suggestions. Note jurisdiction-specific variations may apply.",
 
-            AiToolType::MemoGenerator => "{$contextBlock}Generate a legal memorandum for:\n{$inputText}\n{$caseDetails}\nInclude: To, From, Date, Re, Facts, Issue, Analysis, Conclusion.",
+            AiToolType::MemoGenerator => "{$contextBlock}{$outputRequirements}Generate a legal memorandum for:\n{$inputText}\n{$caseDetails}\nInclude: To, From, Date, Re, Facts, Issue, Analysis, Conclusion.",
 
-            AiToolType::LegalNoticeGenerator => "{$contextBlock}Generate a legal notice for:\n{$inputText}\n{$caseDetails}\nInclude: Date, Parties, Subject, Demand, Response deadline, Consequences of non-compliance.",
+            AiToolType::LegalNoticeGenerator => "{$contextBlock}{$outputRequirements}Generate a legal notice for:\n{$inputText}\n{$caseDetails}\nInclude: Date, Parties, Subject, Demand, Response deadline, Consequences of non-compliance.",
 
-            AiToolType::DemandLetterGenerator => "{$contextBlock}Generate a demand letter for:\n{$inputText}\n{$caseDetails}\nInclude: Party details, factual background, legal basis, specific demand, deadline, next steps.",
+            AiToolType::DemandLetterGenerator => "{$contextBlock}{$outputRequirements}Generate a demand letter for:\n{$inputText}\n{$caseDetails}\nInclude: Party details, factual background, legal basis, specific demand, deadline, next steps.",
 
-            AiToolType::TimelineGenerator => "{$contextBlock}Create a legal timeline for:\n{$inputText}\n{$caseDetails}\nList events chronologically with dates, descriptions, and legal significance.",
+            AiToolType::TimelineGenerator => "{$contextBlock}{$outputRequirements}Create a legal timeline for:\n{$inputText}\n{$caseDetails}\nList events chronologically with dates, descriptions, and legal significance.",
 
-            AiToolType::ChecklistGenerator => "{$contextBlock}Generate a legal checklist for:\n{$inputText}\n{$caseDetails}\nProvide actionable items organized by priority and category.",
+            AiToolType::ChecklistGenerator => "{$contextBlock}{$outputRequirements}Generate a legal checklist for:\n{$inputText}\n{$caseDetails}\nProvide actionable items organized by priority and category.",
 
-            AiToolType::ClientExplanationSimplifier => "{$contextBlock}Explain this legal matter in plain language for a non-lawyer:\n{$inputText}\nAvoid jargon. Explain what it means, what action may be needed, and what questions to ask a lawyer.",
+            AiToolType::ClientExplanationSimplifier => "{$contextBlock}{$outputRequirements}Explain this legal matter in plain language for a non-lawyer:\n{$inputText}\nAvoid jargon. Explain what it means, what action may be needed, and what questions to ask a lawyer.",
 
-            AiToolType::DefenseAssistant => "{$contextBlock}Analyze defense strategy for:\n{$inputText}\n{$caseDetails}\nProvide: 1) Possible defenses 2) Weaknesses in the opposing claim 3) Evidence to gather 4) Key legal arguments. This is informational only - consult a qualified lawyer.",
+            AiToolType::DefenseAssistant => "{$contextBlock}{$outputRequirements}Analyze defense strategy for:\n{$inputText}\n{$caseDetails}\nProvide: 1) Possible defenses 2) Weaknesses in the opposing claim 3) Evidence to gather 4) Key legal arguments. This is informational only - consult a qualified lawyer.",
         };
+    }
+
+    private function detectLanguage(string $text): string
+    {
+        return preg_match('/[\x{0600}-\x{06FF}]/u', $text) === 1 ? 'ar' : 'en';
     }
 }

@@ -1,8 +1,8 @@
 <?php
 
 return [
-    'provider' => env('AI_PROVIDER', 'mock'),
-    'embedding_provider' => env('AI_EMBEDDING_PROVIDER', 'mock'),
+    'provider' => env('AI_PROVIDER', 'auto'),
+    'embedding_provider' => env('AI_EMBEDDING_PROVIDER', 'auto'),
 
     'chat_model' => env('AI_CHAT_MODEL', 'gpt-4o-mini'),
     'chat_temperature' => (float) env('AI_CHAT_TEMPERATURE', 0.25),
@@ -139,6 +139,9 @@ Core rules:
 20. Match the user's language. Use Arabic for Arabic questions, English for English questions, and preserve bilingual legal terms when useful.
 21. When the answer is substantive, use the response structure requested in the user message. Keep paragraphs short, use bullets or tables when they improve scanning, and cite source labels inline.
 22. End naturally in a way that welcomes the user's next legal question.
+23. If the user asks to create, generate, export, or download a memo, notice, letter, checklist, timeline, or legal summary, write the complete export-ready content directly. Do not say you cannot create a file; the application will attach a downloadable document to your answer.
+24. Adapt the structure to the user's intent. Use an executive summary for analysis, a formal document layout for drafts, a table for timelines, and checkboxes for checklists.
+25. When key facts are missing, still provide a useful draft or checklist with clearly marked placeholders instead of stopping at a generic clarification request.
 
 Source citation format:
 - Case documents: [CASE_SOURCE_1]

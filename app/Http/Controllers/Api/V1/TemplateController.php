@@ -88,6 +88,16 @@ class TemplateController extends BaseApiController
             'content' => $document->content,
             'disclaimer' => $disclaimer,
             'download' => $this->exportService->publicDownloadData($download),
+            'download_url' => $download['url'] ?? null,
+            'actions' => [[
+                'id' => 'download_docx',
+                'type' => 'download',
+                'label' => 'Download Word file',
+                'style' => 'primary',
+                'url' => $download['url'] ?? null,
+                'format' => $download['format'] ?? 'docx',
+                'file_name' => $download['file_name'] ?? null,
+            ]],
         ], 'Document generated.');
     }
 

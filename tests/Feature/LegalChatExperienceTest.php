@@ -25,7 +25,7 @@ class LegalChatExperienceTest extends TestCase
         Storage::fake('local');
     }
 
-    public function test_chat_sends_uncertain_scope_to_llm_instead_of_backend_redirect(): void
+    public function test_chat_redirects_clear_non_legal_requests_without_calling_llm(): void
     {
         $user = User::factory()->create();
         $conversation = Conversation::factory()->create([
@@ -66,17 +66,15 @@ class LegalChatExperienceTest extends TestCase
         ]);
 
         $response->assertOk()
-            ->assertJsonPath('data.scope.allowed', true)
-            ->assertJsonPath('data.scope.reason', 'llm_scope_check')
-            ->assertJsonPath('data.presentation.variant', 'general_legal_guidance');
+            ->assertJsonPath('data.scope.allowed', false)
+            ->assertJsonPath('data.scope.reason', 'non_legal_topic')
+            ->assertJsonPath('data.presentation.variant', 'legal_only_redirect')
+            ->assertJsonPath('data.presentation.render_hints.show_download_button', false)
+            ->assertJsonPath('data.actions.0.id', 'ask_legal_question');
 
-        $prompt = $provider->chatMessages[1]['content'] ?? '';
-
-        $this->assertStringContainsString('Tell me a joke about coffee.', $prompt);
-        $this->assertStringContainsString('You must decide from the user\'s actual message.', $prompt);
-        $this->assertStringNotContainsString('Legal Topics Only', $response->json('data.answer'));
+        $this->assertSame([], $provider->chatMessages);
+        $this->assertStringContainsString('Legal Topics Only', $response->json('data.answer'));
         $this->assertNotEmpty($response->json('data.follow_up_questions'));
-        $this->assertNotEmpty($response->json('data.download.url'));
     }
 
     public function test_chat_allows_legal_follow_up_without_repeating_full_legal_terms(): void
@@ -109,14 +107,16 @@ class LegalChatExperienceTest extends TestCase
         $response->assertOk()
             ->assertJsonPath('data.scope.allowed', true)
             ->assertJsonPath('data.scope.reason', 'legal_follow_up')
-            ->assertJsonPath('data.presentation.format', 'markdown');
+            ->assertJsonPath('data.presentation.format', 'markdown')
+            ->assertJsonPath('data.download.format', 'docx')
+            ->assertJsonPath('data.actions.0.id', 'download_docx');
 
         $downloadUrl = $response->json('data.download.url');
         $this->assertNotEmpty($downloadUrl);
 
         $downloadResponse = $this->apiAs($user)->get($downloadUrl);
         $downloadResponse->assertOk();
-        $this->assertStringContainsString('.md', $downloadResponse->headers->get('content-disposition', ''));
+        $this->assertStringContainsString('.docx', $downloadResponse->headers->get('content-disposition', ''));
     }
 
     public function test_chat_supports_arabic_legal_questions_with_rtl_metadata(): void
@@ -136,10 +136,11 @@ class LegalChatExperienceTest extends TestCase
             ->assertJsonPath('data.scope.reason', 'legal_topic')
             ->assertJsonPath('data.presentation.language', 'ar')
             ->assertJsonPath('data.presentation.direction', 'rtl')
+            ->assertJsonPath('data.download.format', 'docx')
             ->assertJsonPath('data.disclaimer', config('ai.legal_disclaimer_ar'));
 
         $this->assertStringContainsString('إرشاد قانوني', $response->json('data.answer'));
-        $this->assertStringContainsString('محام', $response->json('data.follow_up_questions.2'));
+        $this->assertTrue(collect($response->json('data.follow_up_questions'))->contains(fn ($question) => str_contains($question, 'محام')));
     }
 
     public function test_chat_sends_knowledge_base_output_to_llm_before_answering(): void
@@ -222,7 +223,8 @@ class LegalChatExperienceTest extends TestCase
             ->assertJsonPath('data.source_type', 'knowledge_base')
             ->assertJsonPath('data.sources.0.source_label', 'KB_SOURCE_1')
             ->assertJsonPath('data.retrieval.knowledge_base_searched_before_llm', true)
-            ->assertJsonPath('data.retrieval.knowledge_base_results_count', 1);
+            ->assertJsonPath('data.retrieval.knowledge_base_results_count', 1)
+            ->assertJsonPath('data.presentation.status_cards.1.id', 'sources');
 
         $prompt = $provider->chatMessages[1]['content'] ?? '';
 

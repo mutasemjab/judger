@@ -65,6 +65,10 @@ class LegalChatService
         $scope = $this->scopeGuard->allowsConversationMessage($conversation, $message);
         $scopeReason = $this->scopeReasonForLlm($scope);
 
+        if (! ($scope['allowed'] ?? false)) {
+            return $this->storeRedirectResponse($conversation, $legalCase->id, $disclaimer, $language);
+        }
+
         $embedding = AiProviderManager::resolveEmbedding()->embedding($message);
         $caseResults = $this->caseDocumentSearch->searchByEmbedding(
             $userId,
@@ -159,8 +163,9 @@ class LegalChatService
         ]);
 
         $download = $this->exportService->exportMessage($assistantMessage);
+        $metadata = $this->experience->messageMetadata($experience, $download);
         $assistantMessage->forceFill([
-            'metadata' => $this->experience->messageMetadata($experience, $download),
+            'metadata' => $metadata,
         ])->save();
 
         $conversation->update(['last_message_at' => now()]);
@@ -184,6 +189,8 @@ class LegalChatService
             'scope' => $experience['scope'],
             'retrieval' => $experience['retrieval'],
             'download' => $this->exportService->publicDownloadData($download),
+            'download_url' => $download['url'] ?? null,
+            'actions' => $metadata['actions'] ?? [],
         ];
     }
 
@@ -198,6 +205,10 @@ class LegalChatService
 
         $scope = $this->scopeGuard->allowsConversationMessage($conversation, $message);
         $scopeReason = $this->scopeReasonForLlm($scope);
+
+        if (! ($scope['allowed'] ?? false)) {
+            return $this->storeRedirectResponse($conversation, null, $disclaimer, $language);
+        }
 
         $kbResults = $this->knowledgeSearch->search($message, config('ai.max_knowledge_chunks'));
         $retrieval = $this->buildRetrievalMetadata([], $kbResults, false);
@@ -268,8 +279,9 @@ class LegalChatService
         ]);
 
         $download = $this->exportService->exportMessage($assistantMessage);
+        $metadata = $this->experience->messageMetadata($experience, $download);
         $assistantMessage->forceFill([
-            'metadata' => $this->experience->messageMetadata($experience, $download),
+            'metadata' => $metadata,
         ])->save();
 
         $conversation->update(['last_message_at' => now()]);
@@ -287,6 +299,8 @@ class LegalChatService
             'scope' => $experience['scope'],
             'retrieval' => $experience['retrieval'],
             'download' => $this->exportService->publicDownloadData($download),
+            'download_url' => $download['url'] ?? null,
+            'actions' => $metadata['actions'] ?? [],
         ];
     }
 
@@ -311,8 +325,9 @@ class LegalChatService
         ]);
 
         $download = $this->exportService->exportMessage($assistantMessage);
+        $metadata = $this->experience->messageMetadata($experience, $download);
         $assistantMessage->forceFill([
-            'metadata' => $this->experience->messageMetadata($experience, $download),
+            'metadata' => $metadata,
         ])->save();
 
         $conversation->update(['last_message_at' => now()]);
@@ -329,6 +344,8 @@ class LegalChatService
             'presentation' => $experience['presentation'],
             'scope' => $experience['scope'],
             'download' => $this->exportService->publicDownloadData($download),
+            'download_url' => $download['url'] ?? null,
+            'actions' => $metadata['actions'] ?? [],
         ];
     }
 
@@ -393,6 +410,8 @@ class LegalChatService
                 ."- اذكر مصدر كل نقطة مأخوذة من المستندات بصيغة [KB_SOURCE_1] أو [CASE_SOURCE_1].\n"
                 ."- إذا لم تظهر مصادر كافية، قل بوضوح إن البحث في قاعدة المعرفة لم يرجع مطابقات قوية.\n"
                 ."- لا تخترع قوانين أو مواعيد أو وقائع قضية غير موجودة في السياق.\n"
+                ."- إذا طلب المستخدم إنشاء ملف أو تنزيل مذكرة أو إنذار أو خطاب أو قائمة تحقق أو جدول زمني، اكتب المحتوى كاملا بصيغة جاهزة للتصدير ولا تقل إنك لا تستطيع إنشاء ملف؛ سيضيف النظام ملف Word قابل للتنزيل.\n"
+                ."- إذا كانت بعض البيانات ناقصة في المستند، استخدم خانات واضحة مثل [اسم الطرف] أو [التاريخ] بدلا من إيقاف الإجابة بالكامل.\n"
                 ."- اختم بسؤال متابعة قانوني واحد يساعد المستخدم على المتابعة.\n"
                 ."- Include this disclaimer exactly: {$disclaimer}";
         }
@@ -411,6 +430,8 @@ class LegalChatService
             ."- Cite every source-based point inline as [KB_SOURCE_1] or [CASE_SOURCE_1].\n"
             ."- If there are not enough source matches, clearly say the knowledge base did not return a strong match before any cautious general orientation.\n"
             ."- Do not invent laws, deadlines, citations, or case facts.\n"
+            ."- If the user asks to create a file or download a memo, notice, letter, checklist, or timeline, write the complete export-ready content and do not say you cannot create a file; the application will attach a downloadable Word document.\n"
+            ."- If details are missing from a document, use clear placeholders such as [party name] or [date] instead of stopping the answer entirely.\n"
             ."- End with one useful legal follow-up question.\n"
             ."- Include this disclaimer exactly: {$disclaimer}";
     }

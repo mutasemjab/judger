@@ -24,6 +24,8 @@ class MessageResource extends JsonResource
             'presentation' => $metadata['presentation'] ?? null,
             'scope' => $metadata['scope'] ?? null,
             'download' => isset($metadata['download']) ? $this->publicDownload($metadata['download']) : null,
+            'download_url' => $metadata['download']['url'] ?? null,
+            'actions' => $metadata['actions'] ?? [],
             'metadata' => $this->publicMetadata($metadata),
             'attachments' => ChatAttachmentResource::collection($this->whenLoaded('attachments')),
             'created_at' => $this->created_at,

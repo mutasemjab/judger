@@ -18,10 +18,12 @@ class LegalExperienceService
     ): array
     {
         $language = $this->normalizeLanguage($language);
+        $answer = $this->normalizeMarkdown($answer, $this->conversationFallbackTitle($conversation, $language));
+        $followUps = $this->conversationFollowUps($conversation, $sources, $language, $answer, $retrieval);
 
         return [
-            'answer' => $this->normalizeMarkdown($answer, $this->conversationFallbackTitle($conversation, $language)),
-            'follow_up_questions' => $this->conversationFollowUps($conversation, $sources, $language),
+            'answer' => $answer,
+            'follow_up_questions' => $followUps,
             'next_question_prompt' => $language === 'ar'
                 ? 'اسأل سؤالك القانوني التالي في أي وقت، وسأتابع من نفس السياق.'
                 : 'Ask the next legal question anytime, and I will continue from here.',
@@ -34,6 +36,14 @@ class LegalExperienceService
                 'show_sources' => ! empty($sources),
                 'show_disclaimer' => true,
                 'retrieval' => $retrieval,
+                'render_hints' => [
+                    'show_markdown' => true,
+                    'show_follow_up_chips' => true,
+                    'show_download_button' => true,
+                    'show_source_cards' => ! empty($sources),
+                    'compact_paragraphs' => true,
+                ],
+                'status_cards' => $this->conversationStatusCards($conversation, $sources, $retrieval, $language),
             ],
             'scope' => [
                 'allowed' => true,
@@ -45,22 +55,38 @@ class LegalExperienceService
 
     public function buildToolPayload(AiToolType $toolType, string $answer, array $sources = []): array
     {
+        $language = $this->detectLanguage($answer);
         $isDraftingTool = in_array($toolType, [
             AiToolType::MemoGenerator,
             AiToolType::LegalNoticeGenerator,
             AiToolType::DemandLetterGenerator,
+            AiToolType::TimelineGenerator,
+            AiToolType::ChecklistGenerator,
         ], true);
+        $content = $this->normalizeMarkdown($answer, $toolType->label());
 
         return [
-            'content' => $this->normalizeMarkdown($answer, $toolType->label()),
-            'follow_up_questions' => $this->toolFollowUps($toolType),
-            'next_question_prompt' => 'If you want another legal draft or revision, ask the next question and I will build on this output.',
+            'content' => $content,
+            'follow_up_questions' => $this->toolFollowUps($toolType, $language, $content),
+            'next_question_prompt' => $language === 'ar'
+                ? 'اطلب أي تعديل أو نسخة أخرى، وسأبني على هذا المخرج مباشرة.'
+                : 'Ask for any revision or another version, and I will build on this output.',
             'presentation' => [
                 'format' => 'markdown',
                 'style' => 'judger_pro',
                 'variant' => $isDraftingTool ? 'generated_legal_document' : 'legal_analysis',
+                'language' => $language,
+                'direction' => $language === 'ar' ? 'rtl' : 'ltr',
                 'show_sources' => ! empty($sources),
                 'show_disclaimer' => true,
+                'render_hints' => [
+                    'show_markdown' => true,
+                    'show_follow_up_chips' => true,
+                    'show_download_button' => true,
+                    'show_source_cards' => ! empty($sources),
+                    'compact_paragraphs' => true,
+                ],
+                'status_cards' => $this->toolStatusCards($toolType, $sources, $language),
             ],
             'scope' => [
                 'allowed' => true,
@@ -100,6 +126,13 @@ class LegalExperienceService
                 'direction' => $language === 'ar' ? 'rtl' : 'ltr',
                 'show_sources' => false,
                 'show_disclaimer' => true,
+                'render_hints' => [
+                    'show_markdown' => true,
+                    'show_follow_up_chips' => true,
+                    'show_download_button' => false,
+                    'show_source_cards' => false,
+                    'compact_paragraphs' => true,
+                ],
             ],
             'scope' => [
                 'allowed' => false,
@@ -122,64 +155,154 @@ class LegalExperienceService
             $metadata['download'] = $download;
         }
 
+        $metadata['actions'] = $this->actionsForPayload($payload, $download);
+
         return $metadata;
     }
 
-    private function conversationFollowUps(Conversation $conversation, array $sources, string $language): array
+    public function actionsForPayload(array $payload, ?array $download = null): array
     {
-        if ($conversation->isCase()) {
-            if ($language === 'ar') {
-                return [
-                    'ما المهلة أو الخطر أو الجلسة التي يجب متابعتها بعد ذلك؟',
-                    'ما الدليل أو المستند الذي لا يزال ناقصا في هذه القضية؟',
-                    'هل يمكنك تحويل ذلك إلى مذكرة أو جدول زمني أو قائمة تحقق؟',
-                ];
-            }
+        $language = $this->normalizeLanguage($payload['presentation']['language'] ?? 'en');
+        $scopeAllowed = (bool) ($payload['scope']['allowed'] ?? true);
 
-            return [
-                'What deadline, risk, or hearing should I track next?',
-                'What evidence or document is still missing in this case?',
-                'Can you turn this into a memo, timeline, or checklist?',
+        if (! $scopeAllowed) {
+            return [[
+                'id' => 'ask_legal_question',
+                'type' => 'prompt',
+                'label' => $language === 'ar' ? 'اسأل سؤالا قانونيا' : 'Ask a legal question',
+                'style' => 'primary',
+            ]];
+        }
+
+        $actions = [];
+
+        if (is_array($download) && ($download['available'] ?? false) && ! empty($download['url'])) {
+            $actions[] = [
+                'id' => 'download_docx',
+                'type' => 'download',
+                'label' => $language === 'ar' ? 'تنزيل ملف Word' : 'Download Word file',
+                'style' => 'primary',
+                'url' => $download['url'],
+                'format' => $download['format'] ?? 'docx',
+                'file_name' => $download['file_name'] ?? null,
             ];
         }
 
-        if (! empty($sources)) {
+        $actions[] = [
+            'id' => 'save_as_note',
+            'type' => 'save',
+            'label' => $language === 'ar' ? 'حفظ كملاحظة' : 'Save as note',
+            'style' => 'secondary',
+        ];
+
+        $actions[] = [
+            'id' => 'ask_follow_up',
+            'type' => 'prompt',
+            'label' => $language === 'ar' ? 'سؤال متابعة' : 'Ask follow-up',
+            'style' => 'secondary',
+        ];
+
+        $retrieval = $payload['retrieval'] ?? [];
+        $hasSources = (($retrieval['knowledge_base_results_count'] ?? 0) + ($retrieval['case_document_results_count'] ?? 0)) > 0
+            || (bool) ($payload['presentation']['show_sources'] ?? false);
+
+        if (! $hasSources) {
+            $actions[] = [
+                'id' => 'upload_source_document',
+                'type' => 'upload',
+                'label' => $language === 'ar' ? 'إضافة مستند داعم' : 'Add source document',
+                'style' => 'tertiary',
+            ];
+        }
+
+        return $actions;
+    }
+
+    private function conversationFollowUps(Conversation $conversation, array $sources, string $language, string $answer, array $retrieval): array
+    {
+        $questions = [];
+        $hasSources = ! empty($sources);
+        $answerLower = mb_strtolower($answer);
+
+        if ($conversation->isCase()) {
             if ($language === 'ar') {
-                return [
-                    'هل يمكنك تبسيط ذلك بلغة أوضح؟',
-                    'ما الوقائع التي قد تغير هذه الإجابة القانونية؟',
-                    'ما السؤال التالي الذي يجب طرحه على محام بخصوص هذه المسألة؟',
-                ];
+                $questions[] = 'ما الدليل أو المستند الذي لا يزال ناقصا في هذه القضية؟';
+                $questions[] = 'ما المهلة أو الخطر أو الجلسة التي يجب متابعتها بعد ذلك؟';
+                $questions[] = 'هل يمكنك تحويل ذلك إلى مذكرة أو جدول زمني أو قائمة تحقق؟';
+                return $this->limitQuestions($questions);
             }
 
-            return [
-                'Can you simplify this in plain language?',
-                'What facts could change this legal answer?',
-                'What should I ask a lawyer next about this issue?',
-            ];
+            $questions[] = 'What evidence or document is still missing in this case?';
+            $questions[] = 'What deadline, risk, or hearing should I track next?';
+            $questions[] = 'Can you turn this into a memo, timeline, or checklist?';
+            return $this->limitQuestions($questions);
         }
 
         if ($language === 'ar') {
-            return [
-                'هل يمكنك شرح ذلك بمثال عملي؟',
-                'ما الوقائع التي تحتاجها مني لجعل الإجابة أكثر تحديدا؟',
-                'ما السؤال التالي الذي يجب طرحه على محام بخصوص هذه المسألة؟',
-            ];
+            if (! $hasSources) {
+                $questions[] = 'هل لديك عقد أو مستند أو بلد اختصاص أضيفه لجعل الإجابة أدق؟';
+            }
+
+            if (str_contains($answerLower, 'مهلة') || str_contains($answerLower, 'موعد')) {
+                $questions[] = 'ما التاريخ أو المهلة التي تريد تحويلها إلى خطوات عملية؟';
+            }
+
+            if (str_contains($answerLower, 'مخاطر') || str_contains($answerLower, 'خطر')) {
+                $questions[] = 'هل تريد ترتيب المخاطر حسب الأولوية؟';
+            }
+
+            $questions[] = 'ما الوقائع التي قد تغير هذه الإجابة القانونية؟';
+            $questions[] = 'ما السؤال التالي الذي يجب طرحه على محام بخصوص هذه المسألة؟';
+            $questions[] = 'هل يمكنك تبسيط ذلك بلغة أوضح؟';
+
+            return $this->limitQuestions($questions);
         }
 
-        return [
-            'Can you explain this with a practical example?',
-            'What facts do you need from me to make this more specific?',
-            'What should I ask a lawyer next about this issue?',
-        ];
+        if (! $hasSources) {
+            $questions[] = 'Do you have a contract, document, or jurisdiction I should use to make this more precise?';
+        }
+
+        if (str_contains($answerLower, 'deadline') || str_contains($answerLower, 'date')) {
+            $questions[] = 'Which deadline or date should I turn into next steps?';
+        }
+
+        if (str_contains($answerLower, 'risk')) {
+            $questions[] = 'Do you want the risks ranked by priority?';
+        }
+
+        $questions[] = 'What facts could change this legal answer?';
+        $questions[] = 'What should I ask a lawyer next about this issue?';
+        $questions[] = 'Can you simplify this in plain language?';
+
+        return $this->limitQuestions($questions);
     }
 
-    private function toolFollowUps(AiToolType $toolType): array
+    private function toolFollowUps(AiToolType $toolType, string $language, string $content): array
     {
+        if ($language === 'ar') {
+            return match ($toolType) {
+                AiToolType::MemoGenerator => [
+                    'هل تريد نسخة مختصرة كملخص تنفيذي؟',
+                    'هل تريد صياغتها بلغة مناسبة للعميل؟',
+                    'هل تريد تخصيصها لاختصاص قضائي محدد؟',
+                ],
+                AiToolType::LegalNoticeGenerator, AiToolType::DemandLetterGenerator => [
+                    'هل تريد جعل النبرة أكثر حزما أو أكثر حيادا؟',
+                    'هل تريد إضافة مهلة أو بيانات الأطراف؟',
+                    'هل تريد نسخة مناسبة للبريد الإلكتروني أو للطباعة؟',
+                ],
+                default => [
+                    'هل تريد تحويل ذلك إلى مذكرة أو قائمة تحقق قابلة للتنزيل؟',
+                    'هل تريد تبسيطه للعميل أو لغير المتخصص؟',
+                    'هل تريد تفصيلا قانونيا أكثر لأحد الأقسام؟',
+                ],
+            };
+        }
+
         return match ($toolType) {
             AiToolType::MemoGenerator => [
-                'Should I rewrite this memo for a client-facing audience?',
                 'Do you want a shorter executive summary version?',
+                'Should I rewrite this memo for a client-facing audience?',
                 'Should I tailor this memo to a specific jurisdiction?',
             ],
             AiToolType::LegalNoticeGenerator, AiToolType::DemandLetterGenerator => [
@@ -188,11 +311,69 @@ class LegalExperienceService
                 'Should I rewrite this for email or printed delivery?',
             ],
             default => [
-                'Do you want this turned into a downloadable memo or checklist?',
+                str_contains(mb_strtolower($content), 'checklist')
+                    ? 'Do you want the checklist reordered by urgency?'
+                    : 'Do you want this turned into a memo or checklist?',
                 'Should I simplify this for a client or non-lawyer?',
                 'Do you want a more detailed legal follow-up on one section?',
             ],
         };
+    }
+
+    private function conversationStatusCards(Conversation $conversation, array $sources, array $retrieval, string $language): array
+    {
+        $sourceCount = count($sources);
+        $cards = [[
+            'id' => 'answer_type',
+            'label' => $language === 'ar' ? 'نوع الرد' : 'Answer type',
+            'value' => $conversation->isCase()
+                ? ($language === 'ar' ? 'إرشاد قضية' : 'Case guidance')
+                : ($language === 'ar' ? 'إرشاد قانوني عام' : 'General legal guidance'),
+        ]];
+
+        $cards[] = [
+            'id' => 'sources',
+            'label' => $language === 'ar' ? 'المصادر المستخدمة' : 'Sources used',
+            'value' => $sourceCount > 0
+                ? (string) $sourceCount
+                : ($language === 'ar' ? 'لا توجد مطابقة قوية' : 'No strong match'),
+        ];
+
+        if (($retrieval['case_documents_searched'] ?? false) === true) {
+            $cards[] = [
+                'id' => 'case_documents',
+                'label' => $language === 'ar' ? 'مستندات القضية' : 'Case documents',
+                'value' => (string) ($retrieval['case_document_results_count'] ?? 0),
+            ];
+        }
+
+        return $cards;
+    }
+
+    private function toolStatusCards(AiToolType $toolType, array $sources, string $language): array
+    {
+        return [
+            [
+                'id' => 'tool_type',
+                'label' => $language === 'ar' ? 'نوع الأداة' : 'Tool type',
+                'value' => $toolType->label(),
+            ],
+            [
+                'id' => 'download_ready',
+                'label' => $language === 'ar' ? 'جاهز للتنزيل' : 'Download ready',
+                'value' => $language === 'ar' ? 'نعم' : 'Yes',
+            ],
+            [
+                'id' => 'sources',
+                'label' => $language === 'ar' ? 'المصادر المستخدمة' : 'Sources used',
+                'value' => count($sources) > 0 ? (string) count($sources) : ($language === 'ar' ? 'لا توجد' : 'None'),
+            ],
+        ];
+    }
+
+    private function limitQuestions(array $questions): array
+    {
+        return array_slice(array_values(array_unique(array_filter($questions))), 0, 3);
     }
 
     private function normalizeMarkdown(string $content, string $fallbackTitle): string
@@ -222,5 +403,10 @@ class LegalExperienceService
     private function normalizeLanguage(string $language): string
     {
         return $language === 'ar' ? 'ar' : 'en';
+    }
+
+    private function detectLanguage(string $text): string
+    {
+        return preg_match('/[\x{0600}-\x{06FF}]/u', $text) === 1 ? 'ar' : 'en';
     }
 }

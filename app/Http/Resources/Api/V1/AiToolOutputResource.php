@@ -24,6 +24,8 @@ class AiToolOutputResource extends JsonResource
             'presentation' => $output['presentation'] ?? null,
             'scope' => $output['scope'] ?? null,
             'download' => isset($output['download']) ? $this->publicDownload($output['download']) : null,
+            'download_url' => $output['download']['url'] ?? null,
+            'actions' => $output['actions'] ?? [],
             'created_at' => $this->created_at,
         ];
     }
