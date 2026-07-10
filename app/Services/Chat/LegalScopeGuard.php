@@ -45,10 +45,10 @@ class LegalScopeGuard
         }
 
         return (bool) preg_match(
-            '/\b(legal|illegal|lawful|rights?|obligations?|liable|lawsuit|court|judge|contract|agreement|notice|appeal|evidence|deadline|compliance|regulation|policy|claim|damages?)\b/u',
+            '/\b(legal|illegal|lawful|rights?|obligations?|liable|lawsuit|court|judge|contract|agreement|notice|appeal|evidence|deadline|compliance|regulation|policy|claim|damages?|company|corporation|incorporation|partnership|shareholders?|commercial register|business license|trade license)\b/u',
             $normalized
         ) || (bool) preg_match(
-            '/(قانون|قانوني|محام|محكمة|قضية|دعوى|عقد|اتفاقية|إنذار|إشعار|استئناف|دليل|أدلة|مهلة|اختصاص|امتثال|تعويض|غرامة|حقوق|التزامات|شكوى)/u',
+            '/(قانون|قانوني|محام|محكمه|قضيه|دعوي|عقد|اتفاقيه|انذار|اشعار|استئناف|دليل|ادله|مهله|اختصاص|امتثال|تعويض|غرامه|حقوق|التزامات|شكوي|شركه|شركات|تاسيس|انشاء|سجل تجاري|ترخيص تجاري|رخصه تجاريه|نشاط تجاري|مؤسسه|شريك|شركاء|مساهم|راس مال|حصص|مسؤوليه محدوده|عقد تاسيس|نظام اساسي)/u',
             $normalized
         );
     }
@@ -101,6 +101,9 @@ class LegalScopeGuard
     private function normalize(string $text): string
     {
         $text = Str::lower($text);
+        $text = str_replace(['أ', 'إ', 'آ', 'ٱ'], 'ا', $text);
+        $text = str_replace(['ة', 'ى'], ['ه', 'ي'], $text);
+        $text = preg_replace('/[\x{064B}-\x{065F}\x{0670}]/u', '', $text) ?? $text;
         $text = preg_replace('/\s+/u', ' ', $text) ?? $text;
 
         return trim($text);

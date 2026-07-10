@@ -143,6 +143,29 @@ class LegalChatExperienceTest extends TestCase
         $this->assertTrue(collect($response->json('data.follow_up_questions'))->contains(fn ($question) => str_contains($question, 'محام')));
     }
 
+    public function test_chat_treats_arabic_company_formation_as_legal_question(): void
+    {
+        $user = User::factory()->create();
+        $conversation = Conversation::factory()->create([
+            'user_id' => $user->id,
+            'title' => 'استشارة تأسيس شركة',
+        ]);
+
+        $response = $this->apiAs($user)->postJson("/api/v1/conversations/{$conversation->id}/chat", [
+            'message' => 'ما هي شروط انشاء شركه',
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('data.scope.allowed', true)
+            ->assertJsonPath('data.scope.reason', 'legal_topic')
+            ->assertJsonPath('data.presentation.variant', 'general_legal_guidance')
+            ->assertJsonPath('data.presentation.language', 'ar')
+            ->assertJsonPath('data.presentation.direction', 'rtl')
+            ->assertJsonPath('data.download.format', 'docx');
+
+        $this->assertStringNotContainsString('الموضوعات القانونية فقط', $response->json('data.answer'));
+    }
+
     public function test_chat_sends_knowledge_base_output_to_llm_before_answering(): void
     {
         $user = User::factory()->create();

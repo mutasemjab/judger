@@ -72,6 +72,10 @@ TEXT
         'immigration', 'visa', 'residency', 'tax', 'trademark', 'copyright', 'patent',
         'intellectual property', 'privacy', 'data protection', 'consumer protection',
         'rights', 'obligations', 'duty', 'illegal', 'lawful', 'sue', 'complaint',
+        'company', 'corporation', 'business', 'incorporation', 'company formation',
+        'register company', 'commercial register', 'business license', 'trade license',
+        'articles of association', 'shareholder', 'partner', 'partnership', 'share capital',
+        'limited liability', 'llc', 'startup', 'business permit',
         'قانون', 'قانوني', 'قانونية', 'محامي', 'محاماة', 'محكمة', 'قاضي', 'جلسة',
         'استئناف', 'قضية', 'دعوى', 'مطالبة', 'نزاع', 'نزاعات', 'مدعي', 'مدعى عليه',
         'دليل', 'أدلة', 'إثبات', 'عقد', 'اتفاقية', 'شرط', 'إخلال', 'إنذار', 'إشعار',
@@ -81,7 +85,11 @@ TEXT
         'عقار', 'إيجار', 'مؤجر', 'مستأجر', 'إخلاء', 'عمل', 'عمالي', 'فصل',
         'هجرة', 'تأشيرة', 'إقامة', 'ضريبة', 'علامة تجارية', 'حقوق النشر',
         'خصوصية', 'حماية البيانات', 'حقوق', 'التزامات', 'واجب', 'غير قانوني',
-        'مشروع', 'شكوى',
+        'مشروع', 'شكوى', 'شركة', 'شركه', 'شركات', 'إنشاء شركة', 'انشاء شركه',
+        'تأسيس شركة', 'تاسيس شركه', 'شروط إنشاء شركة', 'شروط انشاء شركه',
+        'سجل تجاري', 'ترخيص تجاري', 'رخصة تجارية', 'نشاط تجاري', 'تجارة',
+        'مؤسسة', 'شريك', 'شركاء', 'مساهم', 'مساهمين', 'رأس مال', 'راس مال',
+        'حصص', 'مسؤولية محدودة', 'ذات مسؤولية محدودة', 'عقد تأسيس', 'نظام أساسي',
     ],
 
     'follow_up_markers' => [
