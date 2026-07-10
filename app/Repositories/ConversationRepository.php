@@ -9,7 +9,9 @@ class ConversationRepository
 {
     public function forUser(int $userId, array $filters = [], int $perPage = 15): LengthAwarePaginator
     {
-        $query = Conversation::where('user_id', $userId)->orderByDesc('last_message_at');
+        $query = Conversation::where('user_id', $userId)
+            ->withCount('messages')
+            ->orderByDesc('last_message_at');
 
         if (!empty($filters['type'])) {
             $query->where('type', $filters['type']);
