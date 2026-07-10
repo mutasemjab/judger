@@ -45,10 +45,10 @@ class LegalScopeGuard
         }
 
         return (bool) preg_match(
-            '/\b(legal|illegal|lawful|rights?|obligations?|liable|lawsuit|court|judge|contract|agreement|notice|appeal|evidence|deadline|compliance|regulation|policy|claim|damages?|company|corporation|incorporation|partnership|shareholders?|commercial register|business license|trade license)\b/u',
+            '/\b(legal|illegal|lawful|rights?|obligations?|liable|lawsuit|court|judge|contract|agreement|notice|appeal|evidence|deadline|compliance|regulation|policy|claim|damages?|criminal|crime|punishment|sentence|sentencing|murder|homicide|manslaughter|felony|misdemeanor|prison|jail|imprisonment|company|corporation|incorporation|partnership|shareholders?|commercial register|business license|trade license)\b/u',
             $normalized
         ) || (bool) preg_match(
-            '/(قانون|قانوني|محام|محكمه|قضيه|دعوي|عقد|اتفاقيه|انذار|اشعار|استئناف|دليل|ادله|مهله|اختصاص|امتثال|تعويض|غرامه|حقوق|التزامات|شكوي|شركه|شركات|تاسيس|انشاء|سجل تجاري|ترخيص تجاري|رخصه تجاريه|نشاط تجاري|مؤسسه|شريك|شركاء|مساهم|راس مال|حصص|مسؤوليه محدوده|عقد تاسيس|نظام اساسي)/u',
+            '/(قانون|قانوني|محام|محكمه|قضيه|دعوي|عقد|اتفاقيه|انذار|اشعار|استئناف|دليل|ادله|مهله|اختصاص|امتثال|تعويض|غرامه|حقوق|التزامات|شكوي|جنائي|جنايه|جنحه|جريمه|عقوبه|عقوبات|قتل|القتل|سجن|حبس|اعدام|قصاص|شركه|شركات|تاسيس|انشاء|سجل تجاري|ترخيص تجاري|رخصه تجاريه|نشاط تجاري|مؤسسه|شريك|شركاء|مساهم|راس مال|حصص|مسؤوليه محدوده|عقد تاسيس|نظام اساسي)/u',
             $normalized
         );
     }

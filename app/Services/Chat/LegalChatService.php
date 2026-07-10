@@ -16,6 +16,7 @@ use App\Services\AI\LegalExperienceService;
 use App\Services\Documents\GeneratedFileExportService;
 use App\Services\Search\CaseDocumentSearchService;
 use App\Services\Search\KnowledgeSearchService;
+use Illuminate\Support\Str;
 use RuntimeException;
 
 class LegalChatService
@@ -62,7 +63,7 @@ class LegalChatService
         $language = $this->detectLanguage($message);
         $disclaimer = $this->disclaimerForLanguage($language);
 
-        $scope = $this->scopeGuard->allowsConversationMessage($conversation, $message);
+        $scope = $this->resolveLegalScope($conversation, $message, $language);
         $scopeReason = $this->scopeReasonForLlm($scope);
 
         if (! ($scope['allowed'] ?? false)) {
@@ -201,7 +202,7 @@ class LegalChatService
         $language = $this->detectLanguage($message);
         $disclaimer = $this->disclaimerForLanguage($language);
 
-        $scope = $this->scopeGuard->allowsConversationMessage($conversation, $message);
+        $scope = $this->resolveLegalScope($conversation, $message, $language);
         $scopeReason = $this->scopeReasonForLlm($scope);
 
         if (! ($scope['allowed'] ?? false)) {
@@ -360,6 +361,109 @@ class LegalChatService
         return ($scope['allowed'] ?? false)
             ? (string) ($scope['reason'] ?? 'legal_topic')
             : 'llm_scope_check';
+    }
+
+    private function resolveLegalScope(Conversation $conversation, string $message, string $language): array
+    {
+        $scope = $this->scopeGuard->allowsConversationMessage($conversation, $message);
+
+        if ($scope['allowed'] ?? false) {
+            return $scope;
+        }
+
+        return $this->classifyLegalScopeWithLlm($conversation, $message, $language);
+    }
+
+    private function classifyLegalScopeWithLlm(Conversation $conversation, string $message, string $language): array
+    {
+        $recentMessages = Message::where('conversation_id', $conversation->id)
+            ->whereIn('role', [MessageRole::User->value, MessageRole::Assistant->value])
+            ->orderByDesc('created_at')
+            ->limit(4)
+            ->get()
+            ->reverse()
+            ->map(fn ($m) => ucfirst($m->role->value).': '.Str::limit($m->content, 500))
+            ->join("\n\n");
+
+        try {
+            $result = AiProviderManager::resolve()->chatJson([
+                [
+                    'role' => 'system',
+                    'content' => 'You are a legal-scope classifier for Judger AI. Decide whether the user request should be handled by a legal assistant. Return JSON only.',
+                ],
+                [
+                    'role' => 'user',
+                    'content' => $this->buildScopeClassifierPrompt($message, $recentMessages, $language),
+                ],
+            ], [], [
+                'temperature' => 0,
+                'max_tokens' => 250,
+            ]);
+        } catch (\Throwable) {
+            return [
+                'allowed' => true,
+                'reason' => 'llm_scope_check_unavailable',
+            ];
+        }
+
+        $allowed = $result['allowed'] ?? null;
+
+        if (is_string($allowed)) {
+            $allowed = filter_var($allowed, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+        }
+
+        if (! is_bool($allowed)) {
+            return [
+                'allowed' => true,
+                'reason' => 'llm_scope_check',
+            ];
+        }
+
+        if (! $allowed) {
+            return [
+                'allowed' => false,
+                'reason' => 'non_legal_topic',
+                'classifier_reason' => (string) ($result['reason'] ?? 'llm_rejected_non_legal_topic'),
+            ];
+        }
+
+        return [
+            'allowed' => true,
+            'reason' => (string) ($result['reason'] ?? 'llm_legal_topic'),
+            'classifier_reason' => (string) ($result['explanation'] ?? ''),
+        ];
+    }
+
+    private function buildScopeClassifierPrompt(string $message, string $recentMessages, string $language): string
+    {
+        $languageHint = $language === 'ar'
+            ? 'The user message is Arabic or Arabic-like. Handle spelling variants such as هيا/هي, عقوبه/عقوبة, شركه/شركة, انشاء/إنشاء.'
+            : 'The user message is English or non-Arabic.';
+
+        return <<<PROMPT
+Classify whether this message is legal or law-related.
+
+Return JSON with:
+{
+  "allowed": true or false,
+  "reason": "short_machine_reason",
+  "explanation": "short explanation"
+}
+
+Treat as legal when the user asks about criminal penalties, murder, homicide, theft, fraud, police, courts, contracts, company formation, commercial registration, business licensing, employment, immigration, tax, property, family matters, rights, obligations, disputes, compliance, legal documents, deadlines, procedures, or anything a legal assistant can reasonably help organize or explain.
+
+Do not require exact legal keywords. Infer from meaning, misspellings, common Arabic spelling without hamza, and short natural questions.
+
+Reject only clearly unrelated requests such as jokes, recipes, entertainment, coding, travel tips, general trivia, personal chat, or lifestyle advice with no legal angle.
+
+{$languageHint}
+
+Recent conversation:
+{$recentMessages}
+
+User message:
+{$message}
+PROMPT;
     }
 
     private function buildRetrievalMetadata(array $caseResults, array $kbResults, bool $caseChat): array

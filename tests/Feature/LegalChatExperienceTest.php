@@ -25,7 +25,7 @@ class LegalChatExperienceTest extends TestCase
         Storage::fake('local');
     }
 
-    public function test_chat_redirects_clear_non_legal_requests_without_calling_llm(): void
+    public function test_chat_uses_llm_scope_classifier_to_redirect_clear_non_legal_requests(): void
     {
         $user = User::factory()->create();
         $conversation = Conversation::factory()->create([
@@ -35,6 +35,7 @@ class LegalChatExperienceTest extends TestCase
 
         $provider = new class implements LlmProviderInterface {
             public array $chatMessages = [];
+            public array $classifierMessages = [];
 
             public function chat(array $messages, array $options = []): string
             {
@@ -45,7 +46,13 @@ class LegalChatExperienceTest extends TestCase
 
             public function chatJson(array $messages, array $schema = [], array $options = []): array
             {
-                return [];
+                $this->classifierMessages = $messages;
+
+                return [
+                    'allowed' => false,
+                    'reason' => 'non_legal_topic',
+                    'explanation' => 'The user asked for a coffee joke.',
+                ];
             }
 
             public function embedding(string $text): array
@@ -72,9 +79,67 @@ class LegalChatExperienceTest extends TestCase
             ->assertJsonPath('data.presentation.render_hints.show_download_button', false)
             ->assertJsonPath('data.actions.0.id', 'ask_legal_question');
 
+        $this->assertNotEmpty($provider->classifierMessages);
         $this->assertSame([], $provider->chatMessages);
         $this->assertStringContainsString('Legal Topics Only', $response->json('data.answer'));
         $this->assertNotEmpty($response->json('data.follow_up_questions'));
+    }
+
+    public function test_chat_uses_llm_scope_classifier_for_legal_questions_without_static_keywords(): void
+    {
+        $user = User::factory()->create();
+        $conversation = Conversation::factory()->create([
+            'user_id' => $user->id,
+            'title' => 'Employment Question',
+        ]);
+
+        $provider = new class implements LlmProviderInterface {
+            public array $chatMessages = [];
+            public array $classifierMessages = [];
+
+            public function chat(array $messages, array $options = []): string
+            {
+                $this->chatMessages = $messages;
+
+                return "## Quick Answer\n\nThis is a legal employment-rights question.";
+            }
+
+            public function chatJson(array $messages, array $schema = [], array $options = []): array
+            {
+                $this->classifierMessages = $messages;
+
+                return [
+                    'allowed' => true,
+                    'reason' => 'llm_employment_rights',
+                    'explanation' => 'Keeping an employee passport can raise legal rights and labor issues.',
+                ];
+            }
+
+            public function embedding(string $text): array
+            {
+                return [1.0, 0.0];
+            }
+
+            public function embeddingMany(array $texts): array
+            {
+                return array_fill(0, count($texts), [1.0, 0.0]);
+            }
+        };
+
+        $this->app->instance(MockLlmProvider::class, $provider);
+
+        $response = $this->apiAs($user)->postJson("/api/v1/conversations/{$conversation->id}/chat", [
+            'message' => 'Can my boss keep my passport?',
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('data.scope.allowed', true)
+            ->assertJsonPath('data.scope.reason', 'llm_employment_rights')
+            ->assertJsonPath('data.presentation.variant', 'general_legal_guidance');
+
+        $this->assertNotEmpty($provider->classifierMessages);
+        $this->assertNotEmpty($provider->chatMessages);
+        $this->assertStringNotContainsString('Legal Topics Only', $response->json('data.answer'));
     }
 
     public function test_chat_allows_legal_follow_up_without_repeating_full_legal_terms(): void
@@ -164,6 +229,28 @@ class LegalChatExperienceTest extends TestCase
             ->assertJsonPath('data.presentation.language', 'ar')
             ->assertJsonPath('data.presentation.direction', 'rtl')
             ->assertJsonPath('data.download.format', 'docx');
+
+        $this->assertStringNotContainsString('الموضوعات القانونية فقط', $response->json('data.answer'));
+    }
+
+    public function test_chat_treats_arabic_murder_punishment_as_legal_question(): void
+    {
+        $user = User::factory()->create();
+        $conversation = Conversation::factory()->create([
+            'user_id' => $user->id,
+            'title' => 'استشارة جنائية',
+        ]);
+
+        $response = $this->apiAs($user)->postJson("/api/v1/conversations/{$conversation->id}/chat", [
+            'message' => 'ما هيا عقوبه القتل العمد',
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('data.scope.allowed', true)
+            ->assertJsonPath('data.scope.reason', 'legal_topic')
+            ->assertJsonPath('data.presentation.variant', 'general_legal_guidance')
+            ->assertJsonPath('data.presentation.language', 'ar')
+            ->assertJsonPath('data.presentation.direction', 'rtl');
 
         $this->assertStringNotContainsString('الموضوعات القانونية فقط', $response->json('data.answer'));
     }
